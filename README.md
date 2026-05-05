@@ -23,39 +23,49 @@ Calix is part of the wider calibration stability project at
 
 ## What's on the dashboard
 
-**Status header**
-- Operational / Watch / Degraded / Upgrade Pending pill, computed from chain head age and proximity to the next upgrade
-- Live epoch, head age, network version, blocks-per-epoch cadence
+### Status header
+A sticky bar across the top.
+- Operational pill — `OPERATIONAL` / `WATCH` / `DEGRADED` / `UPGRADE PENDING`, computed live from chain head age and proximity to the next network upgrade.
+- Live epoch, head age, network version, and current blocks-per-epoch cadence.
 
-**Vital signs (KPI grid with sparklines)**
-- Blocks per epoch (calibration steady state ~2.0)
-- Null round percent
-- Average win count per epoch
-- Base fee
-- Network QAP, active miners, total pledge, initial pledge per 32 GiB CC
+### Status banner
+First panel on the page. Spells out the current operational level in plain English with a reason. For example, during the run-up to Fire Horse: *"Fire Horse upgrade approaching. Network version 28 activates in 1d 20h."*
 
-**Tipset stream**
-- Last 60 epochs as colour-coded bars: green for healthy, amber for sparse, red for null
-- Hover any bar for epoch + block count + timestamp
+### Vital signs (8 KPIs)
+Eight cards in a grid, each with an inline 60-epoch sparkline. Each card flips colour (green / amber / red) as the underlying value moves through its thresholds.
+- **Blocks per epoch** — calibration steady state is around 2.0
+- **Null round %** — count of empty tipsets in the window
+- **Average win count** — drand winning tickets per epoch
+- **Base fee** — in atto, with K/M scaling for spikes
+- **Network QAP** — quality-adjusted power
+- **Active miners** — those above min-power
+- **Total pledge** — locked FIL across the network
+- **Initial pledge per 32 GiB CC** — computed locally via the actor v17 formula
 
-**Upgrade readiness**
-- Live countdown to the next network upgrade (currently **nv28 Fire Horse**, epoch 3,694,534, 2026-05-07T14:00:00Z)
-- Direct link to the community announcement
+### Tipset stream
+Sixty vertical bars covering the last 30 minutes of chain history.
+- Green when 3+ blocks landed (healthy)
+- Amber for 1–2 (degraded)
+- Red for 0 (null round)
+Hover any bar for `epoch · block count · timestamp`.
 
-**Network power**
-- 24-hour QAP chart, native SVG
+### Upgrade readiness
+Live countdown to the next network upgrade — currently **nv28 Fire Horse**, epoch 3,694,534, 2026-05-07T14:00:00Z. Days, hours, minutes, seconds. Direct link to the community announcement.
 
-**Leaderboards**
-- Top miners by power with raw + QAP + 24h delta + tags
-- Rich list with actor type and percent of supply
+### Network power chart
+Twenty-four-hour QAP trend, drawn as a native SVG line + area. Redraws on window resize so the geometry stays in real pixels.
 
-**Ecosystem**
-- FEVM daily statistics
-- Plumbline faucet card
-- Open source link
+### Leaderboards
+- **Top miners by power** — raw, QAP, 24-hour delta, blocks mined, and on-chain tags (Curio Storage Inc., etc.)
+- **Rich list** — top accounts by balance, with actor type and percent of supply
 
-**Tools**
-- Epoch ↔ time converter, calibration genesis 1667326380, 30s epochs
+### Ecosystem
+- **FEVM** — daily contract creates, invocations, gas
+- **Plumbline** — calibration faucet card
+- **Open source** — link to this repository
+
+### Tools
+Bidirectional epoch ↔ time converter. Calibration genesis 1667326380, 30-second epochs.
 
 ## Architecture
 
@@ -70,9 +80,10 @@ calix.reiers.io   (Cloudflare → nginx)
                     └── proxies + caches a handful of filfox endpoints
 ```
 
-Single Go binary (~7 MB, no cgo, no third-party deps) plus one static
-HTML file (~45 KB, no framework, no bundler). Every endpoint is cached
-server-side with stale-on-error fallback.
+A single Go binary (~7 MB, no cgo, no third-party deps) plus one static
+HTML file (~50 KB, no framework, no bundler). Every endpoint is cached
+server-side with stale-on-error fallback so the dashboard never goes
+blank when an upstream rate-limits.
 
 ## Endpoints
 
@@ -85,7 +96,7 @@ GET /api/v1/tipsets/recent   Last 60 tipsets with block count + win sum
 GET /api/v1/upgrade          Next upgrade source of truth
 GET /api/v1/miners/top       Top miners by power
 GET /api/v1/rich-list        Rich list
-GET /api/v1/power-history    Power history (24h | 7d | 30d)
+GET /api/v1/power-history    Power history (?duration=24h | 7d | 30d)
 GET /api/v1/fevm-stats       FEVM daily statistics
 GET /api/v1/faucet           Plumbline faucet metadata
 ```
@@ -98,6 +109,7 @@ cd api && CALIX_ADDR=:8765 go run .
 
 # Dashboard
 cd web && python3 -m http.server 8766
+# open http://127.0.0.1:8766
 ```
 
 ## Deploy
@@ -112,6 +124,13 @@ reloads.
 
 Configurable via env: `CALIX_ADDR`, `CALIX_LOTUS_RPC`, `CALIX_FILFOX_API`,
 `CALIX_CORS`, `CALIX_FAUCET_URL`.
+
+## What's coming
+
+- **Per-miner upgrade readiness** — the chain doesn't expose Lotus version directly, but for Storage Providers running Curio we can correlate via the cluster webrpc. A "X of N miners are on Curio v1.28" tile is the single most useful Fire Horse readiness signal.
+- **Chain-weight / fork visualisation** — calibration occasionally forks; weight divergence over time is a high-signal stability metric.
+- **Cluster lens** behind auth — sealing tasks, recent failures, machines online. Sourced from a Curio cluster's webrpc through a tunnel.
+- **Alerts** — a `/api/v1/alerts` surface so other tooling can poll Calix; later, push to Telegram / matrix / webhook.
 
 ## License
 
