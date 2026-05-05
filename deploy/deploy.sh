@@ -52,15 +52,15 @@ sleep 2
 echo "--- /api/v1/health ---"
 curl -fsS https://calix.reiers.io/api/v1/health || echo "warn: health probe failed"
 echo
-echo "--- /api/v1/overview headline ---"
-curl -fsS https://calix.reiers.io/api/v1/overview | python3 -c "
+echo "--- /api/v1/status ---"
+curl -fsS https://calix.reiers.io/api/v1/status | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-print(f\"  height                : {d['height']}\")
-print(f\"  network version       : nv{d['networkVersion']}\")
-print(f\"  IP per 32GiB CC       : {d['ipPerCCSectorFIL']:.2f} FIL\")
-print(f\"  network QAP           : {int(d['networkQualityAdjPower']):,} bytes\")
-print(f\"  total pledge          : {int(d['totalPledgeCollateral'])//10**18:,} FIL\")
+print(f\"  level     : {d['level']}\")
+print(f\"  headline  : {d['headline']}\")
+print(f\"  epoch     : {d['epoch']:,}  (nv{d['networkVersion']})\")
+print(f\"  head age  : {d['headAgeSeconds']}s\")
+print(f\"  next up   : {d['upgradeName']} in {d['upgradeSecsLeft']}s ({d['upgradeEpochsLeft']} epochs)\")
 " 2>/dev/null || true
 echo
 echo "live: https://calix.reiers.io"
