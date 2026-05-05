@@ -27,10 +27,14 @@ rsync -av --delete web/            "$HOST:$REMOTE/web/"
 rsync -av deploy/calix.service     "$HOST:/etc/systemd/system/calix.service"
 rsync -av deploy/calix.nginx       "$HOST:/etc/nginx/sites-available/calix.reiers.io"
 
-echo "==> chown + systemd + nginx"
+echo "==> chown + perms + systemd + nginx"
 ssh "$HOST" bash -se <<'REMOTE_SCRIPT'
 set -euo pipefail
 chown -R calix:calix /opt/calix
+# nginx runs as www-data and needs traverse + read on the static tree.
+chmod 755 /opt/calix /opt/calix/web
+find /opt/calix/web -type d -exec chmod 755 {} \;
+find /opt/calix/web -type f -exec chmod 644 {} \;
 chmod 755 /opt/calix/calix-api
 ln -sf /etc/nginx/sites-available/calix.reiers.io /etc/nginx/sites-enabled/calix.reiers.io
 systemctl daemon-reload
