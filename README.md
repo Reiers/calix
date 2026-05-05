@@ -3,52 +3,59 @@
 </p>
 
 <p align="center">
-  <b>Filecoin calibration testnet dashboard</b><br>
-  Network state, leaderboards, and tooling, served at
-  <a href="https://calix.reiers.io">calix.reiers.io</a>.
+  <b>Filecoin calibration stability console</b><br>
+  Live signals, tipset stream, upgrade readiness.<br>
+  <a href="https://calix.reiers.io">calix.reiers.io</a>
 </p>
 
 ---
 
-Calix is part of a wider calibration stability effort run from
-[reiers.io](https://reiers.io): a small set of public services that make
-it easier to operate, debug, and ship against the Filecoin calibration
-network. Sister projects include
-[Plumbline](https://faucet.reiers.io) (calibration faucet for tFIL +
-USDFC) and the
-[Doctor calibration cluster](https://github.com/Reiers).
+Calix is a real-time stability console for the Filecoin **calibration**
+network. The audience is the people running calibration at scale: storage
+providers, protocol engineers, and the network upgrade team. The job is
+"is the network healthy right now, and what's about to go wrong before
+the next upgrade?".
 
-## Features
+Calix is part of the wider calibration stability project at
+[reiers.io](https://reiers.io). Sister projects:
+- [Plumbline](https://faucet.reiers.io) — calibration faucet for tFIL + USDFC
+- The Doctor calibration cluster
 
-### Network upgrade tracker
+## What's on the dashboard
+
+**Status header**
+- Operational / Watch / Degraded / Upgrade Pending pill, computed from chain head age and proximity to the next upgrade
+- Live epoch, head age, network version, blocks-per-epoch cadence
+
+**Vital signs (KPI grid with sparklines)**
+- Blocks per epoch (calibration steady state ~2.0)
+- Null round percent
+- Average win count per epoch
+- Base fee
+- Network QAP, active miners, total pledge, initial pledge per 32 GiB CC
+
+**Tipset stream**
+- Last 60 epochs as colour-coded bars: green for healthy, amber for sparse, red for null
+- Hover any bar for epoch + block count + timestamp
+
+**Upgrade readiness**
 - Live countdown to the next network upgrade (currently **nv28 Fire Horse**, epoch 3,694,534, 2026-05-07T14:00:00Z)
 - Direct link to the community announcement
-- Sourced from `/api/v1/upgrade`, recomputed every second client-side
 
-### Initial pledge, computed correctly
-- Per-32 GiB CC sector initial pledge, computed via the actor v17 formula
-- Storage pledge term + consensus pledge term shown decomposed
-- Refreshed every 30s from `f04` (power) and `f02` (reward) actor state
-- Useful counterpoint to upstream explorers that mishandle calibration's `circulatingSupply`
+**Network power**
+- 24-hour QAP chart, native SVG
 
-### Network state
-- Network QAP, raw byte power, baseline, block reward
-- Total pledge collateral, average IP per sector, miner counts
-- 24-hour QAP chart, native SVG, no chart library
+**Leaderboards**
+- Top miners by power with raw + QAP + 24h delta + tags
+- Rich list with actor type and percent of supply
 
-### Leaderboards
-- Top miners by power (with their on-chain tags)
-- Rich list (top accounts by balance, with % of supply)
-- Both cached server-side, refreshed once per minute
-
-### Ecosystem
-- FEVM daily statistics (contract creates, invocations, gas)
+**Ecosystem**
+- FEVM daily statistics
 - Plumbline faucet card
-- Recent tipset blocks with miner + base fee + age
+- Open source link
 
-### Tools
-- Epoch ↔ time converter (calibration genesis: 1667326380 / 30 s epochs)
-- Same algorithm as [`epochclock`](https://github.com/Reiers/epochclock), expanded to two-way
+**Tools**
+- Epoch ↔ time converter, calibration genesis 1667326380, 30s epochs
 
 ## Architecture
 
@@ -56,15 +63,32 @@ USDFC) and the
 calix.reiers.io   (Cloudflare → nginx)
   ├── /          → static dashboard (web/index.html)
   └── /api/v1/*  → calix-api (Go, 127.0.0.1:8765)
-                    ├── reads f04 + f02 from a Lotus RPC
-                    ├── computes initial pledge via actor v17
+                    ├── reads f04 (power) + f02 (reward) actor state
+                    ├── samples last 60 tipsets via ChainGetTipSetByHeight
+                    ├── computes IP via the actor v17 formula
+                    ├── classifies status from head age and upgrade window
                     └── proxies + caches a handful of filfox endpoints
 ```
 
-- **API**: a single Go binary (~7 MB, no cgo, no third-party deps), ships via systemd
-- **Dashboard**: a single static HTML file (~45 KB), no framework, no bundler
-- **Reverse proxy**: nginx
-- **Cert**: Cloudflare Origin CA, `*.reiers.io`
+Single Go binary (~7 MB, no cgo, no third-party deps) plus one static
+HTML file (~45 KB, no framework, no bundler). Every endpoint is cached
+server-side with stale-on-error fallback.
+
+## Endpoints
+
+```
+GET /api/v1/health           Health + cache freshness
+GET /api/v1/version          Calix build info
+GET /api/v1/status           Operational status with reason
+GET /api/v1/signals          Vital signs (KPIs + 60-epoch sparkline series)
+GET /api/v1/tipsets/recent   Last 60 tipsets with block count + win sum
+GET /api/v1/upgrade          Next upgrade source of truth
+GET /api/v1/miners/top       Top miners by power
+GET /api/v1/rich-list        Rich list
+GET /api/v1/power-history    Power history (24h | 7d | 30d)
+GET /api/v1/fevm-stats       FEVM daily statistics
+GET /api/v1/faucet           Plumbline faucet metadata
+```
 
 ## Run locally
 
@@ -74,7 +98,6 @@ cd api && CALIX_ADDR=:8765 go run .
 
 # Dashboard
 cd web && python3 -m http.server 8766
-# open http://127.0.0.1:8766
 ```
 
 ## Deploy
@@ -83,12 +106,13 @@ cd web && python3 -m http.server 8766
 ./deploy/deploy.sh
 ```
 
-Builds a `linux/amd64` binary, rsyncs to the host, sets up the systemd
-unit, symlinks the nginx server block, and reloads.
+Builds linux/amd64, rsyncs to the host, sets up the systemd unit,
+symlinks the nginx server block, fixes file modes for `www-data`, and
+reloads.
 
-Configurable via env vars (`CALIX_ADDR`, `CALIX_LOTUS_RPC`, `CALIX_FILFOX_API`,
-`CALIX_CORS`, `CALIX_FAUCET_URL`).
+Configurable via env: `CALIX_ADDR`, `CALIX_LOTUS_RPC`, `CALIX_FILFOX_API`,
+`CALIX_CORS`, `CALIX_FAUCET_URL`.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
