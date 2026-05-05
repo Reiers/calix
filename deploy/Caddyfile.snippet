@@ -1,0 +1,27 @@
+# Append to /etc/caddy/Caddyfile (or include via import).
+# Cloudflare proxies the public DNS, but we still let Caddy terminate TLS to its
+# origin so origin->edge is encrypted. If the cert provisioning races CF DNS,
+# wait for the proxied A record to propagate, or pre-issue with `caddy reload`.
+
+calix.reiers.io {
+    encode zstd gzip
+
+    # static dashboard
+    root * /opt/calix/web
+    file_server
+
+    # API proxy
+    handle_path /api/* {
+        reverse_proxy 127.0.0.1:8765
+    }
+
+    # security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        X-Frame-Options           "DENY"
+        Referrer-Policy           "no-referrer-when-downgrade"
+        # Calix is read-only, no inline JS except module script in our HTML.
+        Content-Security-Policy   "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'"
+    }
+}

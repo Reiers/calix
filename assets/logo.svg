@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60" role="img" aria-label="Calix">
+  <defs>
+    <linearGradient id="cx-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6EE7B7"/>
+      <stop offset="50%" stop-color="#34D399"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+    <linearGradient id="cx-pulse" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#10B981" stop-opacity="0"/>
+      <stop offset="40%" stop-color="#34D399" stop-opacity="1"/>
+      <stop offset="60%" stop-color="#6EE7B7" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#10B981" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- Bracket mark: [   ] with pulse line through -->
+  <g stroke="url(#cx-grad)" stroke-width="3" stroke-linecap="square" fill="none">
+    <!-- left bracket -->
+    <path d="M 14 14 L 4 14 L 4 46 L 14 46"/>
+    <!-- right bracket -->
+    <path d="M 38 14 L 48 14 L 48 46 L 38 46"/>
+  </g>
+  <!-- Pulse line through brackets -->
+  <path d="M 0 30 L 14 30 L 18 30 L 21 22 L 24 38 L 27 26 L 30 34 L 33 30 L 38 30 L 52 30"
+        stroke="url(#cx-pulse)" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Wordmark: Calix -->
+  <text x="64" y="40" font-family="Fraunces, Georgia, serif" font-weight="700"
+        font-size="32" letter-spacing="-1.2"
+        fill="url(#cx-grad)">Calix</text>
+</svg>
