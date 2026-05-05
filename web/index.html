@@ -230,11 +230,12 @@ code { font-family: 'Fira Code', ui-monospace, monospace; font-size: 0.92em; col
 /* ---------- STABILITY OPERATORS ---------- */
 .ops-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: var(--gutter);
 }
-@media (max-width: 1100px) { .ops-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 600px)  { .ops-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1280px) { .ops-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 900px)  { .ops-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 540px)  { .ops-grid { grid-template-columns: 1fr; } }
 .op-card {
     background: var(--bg-2);
     border: 1px solid var(--line);
@@ -251,6 +252,26 @@ code { font-family: 'Fira Code', ui-monospace, monospace; font-size: 0.92em; col
 .op-card .op-head {
     display: flex; align-items: baseline; justify-content: space-between;
     margin-bottom: 4px;
+}
+.op-card .op-title {
+    display: inline-flex; align-items: center; gap: 7px;
+}
+.op-card .op-light {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 6px currentColor;
+    color: var(--ok);
+    flex-shrink: 0;
+    transition: background 0.2s, color 0.2s;
+}
+.op-card[data-status="quiet"] .op-light { background: var(--watch); color: var(--watch); }
+.op-card[data-status="down"]  .op-light { background: var(--bad);   color: var(--bad);
+    animation: opPulse 1.6s ease-in-out infinite;
+}
+@keyframes opPulse {
+    0%,100% { opacity: 1; }
+    50%     { opacity: 0.4; }
 }
 .op-card .op-name {
     font-family: 'Fira Sans', sans-serif;
@@ -292,6 +313,16 @@ code { font-family: 'Fira Code', ui-monospace, monospace; font-size: 0.92em; col
 }
 .op-card .op-delta.pos { color: var(--ok); }
 .op-card .op-delta.neg { color: var(--bad); }
+.op-card .op-status {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--line-2);
+    font-size: 11px;
+    color: var(--fg-soft);
+}
+.op-card[data-status="ok"]    .op-status { color: var(--ok); }
+.op-card[data-status="quiet"] .op-status { color: var(--watch); }
+.op-card[data-status="down"]  .op-status { color: var(--bad); }
 
 /* ---------- KPI GRID ---------- */
 .signals-grid {
@@ -700,9 +731,9 @@ footer a:hover { color: var(--fg-dim); }
       <span class="right">named miner IDs that keep calibration alive</span>
     </div>
     <div class="ops-grid" id="ops-grid">
-      <div class="op-card" data-addr="t0143103">
+      <div class="op-card" data-addr="t0143103" data-status="ok">
         <div class="op-head">
-          <span class="op-name">Reiers</span>
+          <span class="op-title"><span class="op-light"></span><span class="op-name">Reiers</span></span>
           <span class="op-role">primary</span>
         </div>
         <div class="op-id mono">t0143103</div>
@@ -712,10 +743,11 @@ footer a:hover { color: var(--fg-dim); }
           <span><span class="k">blocks</span> <span class="v" data-field="blocks">–</span></span>
           <span class="op-delta" data-field="delta">–</span>
         </div>
+        <div class="op-status mono" data-field="status">checking liveness…</div>
       </div>
-      <div class="op-card" data-addr="t0144416">
+      <div class="op-card" data-addr="t0144416" data-status="ok">
         <div class="op-head">
-          <span class="op-name">Reiers</span>
+          <span class="op-title"><span class="op-light"></span><span class="op-name">Reiers</span></span>
           <span class="op-role">backup</span>
         </div>
         <div class="op-id mono">t0144416</div>
@@ -725,10 +757,11 @@ footer a:hover { color: var(--fg-dim); }
           <span><span class="k">blocks</span> <span class="v" data-field="blocks">–</span></span>
           <span class="op-delta" data-field="delta">–</span>
         </div>
+        <div class="op-status mono" data-field="status">checking liveness…</div>
       </div>
-      <div class="op-card" data-addr="t0180698">
+      <div class="op-card" data-addr="t0180698" data-status="ok">
         <div class="op-head">
-          <span class="op-name">Storswift</span>
+          <span class="op-title"><span class="op-light"></span><span class="op-name">Storswift</span></span>
           <span class="op-role">partner</span>
         </div>
         <div class="op-id mono">t0180698</div>
@@ -738,10 +771,11 @@ footer a:hover { color: var(--fg-dim); }
           <span><span class="k">blocks</span> <span class="v" data-field="blocks">–</span></span>
           <span class="op-delta" data-field="delta">–</span>
         </div>
+        <div class="op-status mono" data-field="status">checking liveness…</div>
       </div>
-      <div class="op-card" data-addr="t0181521">
+      <div class="op-card" data-addr="t0181521" data-status="ok">
         <div class="op-head">
-          <span class="op-name">ChainSafe</span>
+          <span class="op-title"><span class="op-light"></span><span class="op-name">ChainSafe</span></span>
           <span class="op-role">partner</span>
         </div>
         <div class="op-id mono">t0181521</div>
@@ -751,6 +785,21 @@ footer a:hover { color: var(--fg-dim); }
           <span><span class="k">blocks</span> <span class="v" data-field="blocks">–</span></span>
           <span class="op-delta" data-field="delta">–</span>
         </div>
+        <div class="op-status mono" data-field="status">checking liveness…</div>
+      </div>
+      <div class="op-card" data-addr="t04040" data-status="ok">
+        <div class="op-head">
+          <span class="op-title"><span class="op-light"></span><span class="op-name">Venus</span></span>
+          <span class="op-role">partner</span>
+        </div>
+        <div class="op-id mono">t04040</div>
+        <div class="op-stats mono">
+          <span><span class="k">raw</span> <span class="v" data-field="raw">–</span></span>
+          <span><span class="k">qap</span> <span class="v" data-field="qap">–</span></span>
+          <span><span class="k">blocks</span> <span class="v" data-field="blocks">–</span></span>
+          <span class="op-delta" data-field="delta">–</span>
+        </div>
+        <div class="op-status mono" data-field="status">checking liveness…</div>
       </div>
     </div>
   </div>
@@ -1180,6 +1229,35 @@ function refreshOpsFromMiners() {
   });
 }
 
+async function refreshOpStatus() {
+  const cards = Array.from(document.querySelectorAll('.op-card'));
+  if (!cards.length) return;
+  const addrs = cards.map(c => c.dataset.addr).join(',');
+  try {
+    const data = await fetchJSON(`/api/v1/miners/status?addrs=${encodeURIComponent(addrs)}`);
+    const byAddr = new Map((data.miners || []).map(m => [m.address, m]));
+    cards.forEach(card => {
+      const m = byAddr.get(card.dataset.addr);
+      if (!m) return;
+      card.dataset.status = m.status;
+      const statusEl = card.querySelector('[data-field="status"]');
+      if (!statusEl) return;
+      const n = m.blocksLast60;
+      const last = m.lastBlockEpoch;
+      const age = m.lastBlockAgeSec;
+      let txt;
+      if (m.status === 'ok') {
+        txt = `online · ${n} block${n===1?'':'s'} in last 60 epochs`;
+      } else if (m.status === 'quiet') {
+        txt = last ? `quiet · last block ${ageStr(age)} ago (ep ${last.toLocaleString()})` : 'quiet · no recent blocks';
+      } else {
+        txt = last ? `down · last block ${ageStr(age)} ago (ep ${last.toLocaleString()})` : 'down · not seen in last 60 epochs';
+      }
+      statusEl.textContent = txt;
+    });
+  } catch (e) { console.error('miner-status', e); }
+}
+
 async function refreshLeaderboards() {
   try {
     const m = await fetchJSON('/api/v1/miners/top');
@@ -1353,7 +1431,7 @@ setInterval(tickCountdown, 1000);
 tickCountdown();
 
 (async () => {
-  await Promise.all([refreshStatus(), refreshSignals(), refreshTipsetStream(), refreshChart(), refreshLeaderboards(), refreshFEVM(), refreshVersion()]);
+  await Promise.all([refreshStatus(), refreshSignals(), refreshTipsetStream(), refreshChart(), refreshLeaderboards(), refreshFEVM(), refreshVersion(), refreshOpStatus()]);
 
   setInterval(refreshStatus,        15000);
   setInterval(refreshSignals,       30000);
@@ -1361,6 +1439,7 @@ tickCountdown();
   setInterval(refreshChart,        300000);
   setInterval(refreshLeaderboards, 120000);
   setInterval(refreshFEVM,         300000);
+  setInterval(refreshOpStatus,      30000);
 })();
 </script>
 </body>

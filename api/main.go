@@ -324,11 +324,12 @@ type rewardActorState struct {
 // ============================================================================
 
 type tipsetSample struct {
-	Height       int64  `json:"height"`
-	Timestamp    int64  `json:"timestamp"`
-	BlockCount   int    `json:"blockCount"`
-	BaseFeeAtto  string `json:"baseFeeAtto"`
-	WinCountSum  int    `json:"winCountSum"`
+	Height      int64    `json:"height"`
+	Timestamp   int64    `json:"timestamp"`
+	BlockCount  int      `json:"blockCount"`
+	BaseFeeAtto string   `json:"baseFeeAtto"`
+	WinCountSum int      `json:"winCountSum"`
+	Miners      []string `json:"miners,omitempty"`
 }
 
 type tipsetRing struct {
@@ -367,8 +368,10 @@ func (r *tipsetRing) fetchTipsetByHeight(ctx context.Context, height int64) (*ti
 		return &tipsetSample{Height: height, BlockCount: 0}, nil
 	}
 	winSum := 0
+	miners := make([]string, 0, len(t.Blocks))
 	for _, b := range t.Blocks {
 		winSum += b.ElectionProof.WinCount
+		miners = append(miners, b.Miner)
 	}
 	bf := ""
 	if len(t.Blocks) > 0 {
@@ -380,6 +383,7 @@ func (r *tipsetRing) fetchTipsetByHeight(ctx context.Context, height int64) (*ti
 		BlockCount:  len(t.Blocks),
 		BaseFeeAtto: bf,
 		WinCountSum: winSum,
+		Miners:      miners,
 	}, nil
 }
 
@@ -948,6 +952,87 @@ func (a *app) handleFaucet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleMinerStatus returns liveness data for a comma-separated list of miner addrs.
+// /api/v1/miners/status?addrs=t0143103,t0144416,t0180698,t0181521,f04040
+//
+// For each address we report:
+//   - blocksLast60: how many blocks they produced in the last 60 epochs
+//   - lastBlockEpoch: most recent epoch they appeared in (or null)
+//   - lastBlockAgeSec: how long ago that was, in chain seconds
+//   - status: ok | quiet | down
+//
+// Thresholds:
+//   ok    = produced >=1 block in the last 60 epochs (~30 min)
+//   quiet = no blocks in 60 epochs but otherwise reachable
+//   down  = quiet AND we have no recent record (treated same as quiet for now)
+func (a *app) handleMinerStatus(w http.ResponseWriter, r *http.Request) {
+	addrsQ := r.URL.Query().Get("addrs")
+	if addrsQ == "" {
+		writeError(w, 400, "addrs query param is required")
+		return
+	}
+	addrs := strings.Split(addrsQ, ",")
+	for i := range addrs {
+		addrs[i] = strings.TrimSpace(addrs[i])
+	}
+
+	samples := a.ring.snapshot()
+	window := len(samples)
+	nowEpoch := int64(0)
+	nowTs := time.Now().Unix()
+	if window > 0 {
+		nowEpoch = samples[window-1].Height
+	}
+
+	// Build per-address liveness map
+	counts := make(map[string]int)
+	lastEpoch := make(map[string]int64)
+	lastTs := make(map[string]int64)
+	for _, s := range samples {
+		for _, m := range s.Miners {
+			counts[m]++
+			if s.Height > lastEpoch[m] {
+				lastEpoch[m] = s.Height
+				lastTs[m] = s.Timestamp
+			}
+		}
+	}
+
+	out := make([]map[string]any, 0, len(addrs))
+	for _, addr := range addrs {
+		n := counts[addr]
+		le := lastEpoch[addr]
+		lt := lastTs[addr]
+		status := "ok"
+		switch {
+		case n == 0:
+			status = "down"
+		case n < 2:
+			status = "quiet"
+		}
+		item := map[string]any{
+			"address":      addr,
+			"blocksLast60": n,
+			"status":       status,
+		}
+		if le > 0 {
+			item["lastBlockEpoch"] = le
+			if lt > 0 {
+				item["lastBlockAgeSec"] = nowTs - lt
+			} else {
+				item["lastBlockAgeSec"] = (nowEpoch - le) * calibBlockDelaySecs
+			}
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, 200, map[string]any{
+		"window":      window,
+		"epoch":       nowEpoch,
+		"updatedAt":   nowTs,
+		"miners":      out,
+	})
+}
+
 // ============================================================================
 // Plumbing
 // ============================================================================
@@ -999,6 +1084,7 @@ func main() {
 	mux.HandleFunc("/api/v1/power-history", a.handlePowerHistory)
 	mux.HandleFunc("/api/v1/fevm-stats", a.handleFEVM)
 	mux.HandleFunc("/api/v1/faucet", a.handleFaucet)
+	mux.HandleFunc("/api/v1/miners/status", a.handleMinerStatus)
 
 	srv := &http.Server{
 		Addr:              cfg.addr,
