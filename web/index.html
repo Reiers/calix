@@ -227,6 +227,72 @@ code { font-family: 'Fira Code', ui-monospace, monospace; font-size: 0.92em; col
     font-family: 'Fira Code', monospace;
 }
 
+/* ---------- STABILITY OPERATORS ---------- */
+.ops-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--gutter);
+}
+@media (max-width: 1100px) { .ops-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 600px)  { .ops-grid { grid-template-columns: 1fr; } }
+.op-card {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    transition: border-color 0.18s, transform 0.15s;
+    position: relative;
+}
+.op-card:hover { border-color: rgba(52,211,153,0.4); transform: translateY(-1px); }
+.op-card[data-addr="t0143103"] {
+    /* Primary node has a subtle accent edge so it reads as the home miner. */
+    border-left: 2px solid var(--accent);
+}
+.op-card .op-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 4px;
+}
+.op-card .op-name {
+    font-family: 'Fira Sans', sans-serif;
+    font-weight: 600; font-size: 14px;
+    color: var(--fg);
+    letter-spacing: -0.005em;
+}
+.op-card .op-role {
+    font-family: 'Fira Code', monospace;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--fg-soft);
+    padding: 2px 6px;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+}
+.op-card[data-addr="t0143103"] .op-role {
+    color: var(--accent);
+    border-color: rgba(52,211,153,0.4);
+    background: var(--accent-dim);
+}
+.op-card .op-id {
+    font-size: 11px;
+    color: var(--fg-soft);
+    margin-bottom: 10px;
+}
+.op-card .op-stats {
+    display: flex; gap: 14px;
+    flex-wrap: wrap;
+    font-size: 12px;
+}
+.op-card .op-stats .k { color: var(--fg-soft); margin-right: 3px; }
+.op-card .op-stats .v { color: var(--fg); font-weight: 500; }
+.op-card .op-delta {
+    margin-left: auto;
+    color: var(--fg-soft);
+}
+.op-card .op-delta.pos { color: var(--ok); }
+.op-card .op-delta.neg { color: var(--bad); }
+
 /* ---------- KPI GRID ---------- */
 .signals-grid {
     display: grid;
@@ -627,6 +693,68 @@ footer a:hover { color: var(--fg-dim); }
     </div>
   </div>
 
+  <!-- ============= STABILITY OPERATORS ============= -->
+  <div class="section">
+    <div class="lbl">
+      Stability operators
+      <span class="right">named miner IDs that keep calibration alive</span>
+    </div>
+    <div class="ops-grid" id="ops-grid">
+      <div class="op-card" data-addr="t0143103">
+        <div class="op-head">
+          <span class="op-name">Reiers</span>
+          <span class="op-role">primary</span>
+        </div>
+        <div class="op-id mono">t0143103</div>
+        <div class="op-stats mono">
+          <span><span class="k">raw</span> <span class="v" data-field="raw">–</span></span>
+          <span><span class="k">qap</span> <span class="v" data-field="qap">–</span></span>
+          <span><span class="k">blocks</span> <span class="v" data-field="blocks">–</span></span>
+          <span class="op-delta" data-field="delta">–</span>
+        </div>
+      </div>
+      <div class="op-card" data-addr="t0144416">
+        <div class="op-head">
+          <span class="op-name">Reiers</span>
+          <span class="op-role">backup</span>
+        </div>
+        <div class="op-id mono">t0144416</div>
+        <div class="op-stats mono">
+          <span><span class="k">raw</span> <span class="v" data-field="raw">–</span></span>
+          <span><span class="k">qap</span> <span class="v" data-field="qap">–</span></span>
+          <span><span class="k">blocks</span> <span class="v" data-field="blocks">–</span></span>
+          <span class="op-delta" data-field="delta">–</span>
+        </div>
+      </div>
+      <div class="op-card" data-addr="t0180698">
+        <div class="op-head">
+          <span class="op-name">Storswift</span>
+          <span class="op-role">partner</span>
+        </div>
+        <div class="op-id mono">t0180698</div>
+        <div class="op-stats mono">
+          <span><span class="k">raw</span> <span class="v" data-field="raw">–</span></span>
+          <span><span class="k">qap</span> <span class="v" data-field="qap">–</span></span>
+          <span><span class="k">blocks</span> <span class="v" data-field="blocks">–</span></span>
+          <span class="op-delta" data-field="delta">–</span>
+        </div>
+      </div>
+      <div class="op-card" data-addr="t0181521">
+        <div class="op-head">
+          <span class="op-name">ChainSafe</span>
+          <span class="op-role">partner</span>
+        </div>
+        <div class="op-id mono">t0181521</div>
+        <div class="op-stats mono">
+          <span><span class="k">raw</span> <span class="v" data-field="raw">–</span></span>
+          <span><span class="k">qap</span> <span class="v" data-field="qap">–</span></span>
+          <span><span class="k">blocks</span> <span class="v" data-field="blocks">–</span></span>
+          <span class="op-delta" data-field="delta">–</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ============= KPI GRID ============= -->
   <div class="section">
     <div class="lbl">
@@ -1017,9 +1145,45 @@ async function refreshTipsetStream() {
   } catch (e) { console.error('stream', e); }
 }
 
+let _topMiners = null;
+function refreshOpsFromMiners() {
+  if (!_topMiners) return;
+  const byAddr = new Map(_topMiners.map(m => [m.address, m]));
+  document.querySelectorAll('.op-card').forEach(card => {
+    const addr = card.dataset.addr;
+    const m = byAddr.get(addr);
+    const set = (field, v) => {
+      const el = card.querySelector(`[data-field="${field}"]`);
+      if (el) el.textContent = v;
+    };
+    if (!m) {
+      set('raw', '–'); set('qap', '–'); set('blocks', '–'); set('delta', 'not in top miners');
+      return;
+    }
+    set('raw', fmtBytesBig(m.rawBytePower));
+    set('qap', fmtBytesBig(m.qualityAdjPower));
+    set('blocks', m.blocksMined.toLocaleString());
+    const dRaw = BigInt(m.rawBytePowerDelta || '0');
+    const deltaEl = card.querySelector('[data-field="delta"]');
+    if (deltaEl) {
+      deltaEl.classList.remove('pos','neg');
+      if (dRaw === 0n) {
+        deltaEl.textContent = 'steady';
+      } else if (dRaw > 0n) {
+        deltaEl.textContent = `+${fmtBytesBig(dRaw)} 24h`;
+        deltaEl.classList.add('pos');
+      } else {
+        deltaEl.textContent = `−${fmtBytesBig(-dRaw)} 24h`;
+        deltaEl.classList.add('neg');
+      }
+    }
+  });
+}
+
 async function refreshLeaderboards() {
   try {
     const m = await fetchJSON('/api/v1/miners/top');
+    _topMiners = m.miners || [];
     const tb = document.getElementById('miners-tbody');
     tb.innerHTML = m.miners.slice(0, 12).map((row, i) => {
       const tag = row.tag ? ` <span class="tag">${row.tag.name}</span>` : '';
@@ -1039,6 +1203,9 @@ async function refreshLeaderboards() {
     }).join('');
     setText('miners-updated', new Date().toLocaleTimeString());
   } catch (e) { console.error('miners', e); }
+
+  // Rehydrate the stability operators panel from the same payload.
+  refreshOpsFromMiners();
 
   try {
     const r = await fetchJSON('/api/v1/rich-list');
