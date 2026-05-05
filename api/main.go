@@ -1,9 +1,25 @@
-// Calix calibration API.
+// Calix calibration stability console.
 //
-// Reads chain state directly via Lotus RPC for the bits that need to be
-// trusted (initial-pledge math), and proxies a handful of filfox endpoints
-// for things that need indexing we don't run (rich list, miner-power
-// history, FEVM daily stats). Everything is cached server-side.
+// A real-time monitoring API for the Filecoin calibration network. Exposes
+// signal endpoints derived from on-chain reads (Lotus RPC) and indexed
+// public data (filfox), with aggressive server-side caching.
+//
+// Endpoints under /api/v1:
+//
+//	GET  /health           -> ok + cache freshness
+//	GET  /version          -> calix build info
+//	GET  /status           -> overall network status (operational/degraded/upgrade)
+//	GET  /signals          -> KPI grid: blocks/epoch, null-rounds, base fee, QAP, miners, pledge, IP
+//	GET  /signals/sparkline -> 60-epoch history for each KPI
+//	GET  /upgrade          -> next upgrade source of truth
+//	GET  /tipsets/recent   -> last N tipsets with block counts and timestamps
+//	GET  /miners/top       -> top miners by power (filfox proxy)
+//	GET  /rich-list        -> rich list (filfox proxy)
+//	GET  /power-history    -> power chart (filfox proxy)
+//	GET  /fevm-stats       -> FEVM daily statistics (filfox proxy)
+//	GET  /faucet           -> Plumbline faucet metadata
+//
+// All numbers are returned as strings for safe BigInt parsing client-side.
 package main
 
 import (
@@ -18,32 +34,29 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// ----------------------------------------------------------------------------
-// Build info
-// ----------------------------------------------------------------------------
-
-const calixVersion = "0.2.0"
+const calixVersion = "0.3.0"
 
 var calixCommit = "dev"
 
-// Calibration network constants.
+// Calibration constants
 const (
-	calibGenesisUnix    int64 = 1667326380 // 2022-11-01T18:13:00Z
+	calibGenesisUnix    int64 = 1667326380
 	calibBlockDelaySecs int64 = 30
-	// Nv28 "Fire Horse" upgrade: epoch 3,694,534 (2026-05-07T14:00:00Z)
 	nv28UpgradeEpoch    int64 = 3694534
-	nv28UpgradeUnix     int64 = 1778162400 // 2026-05-07T14:00:00Z
+	nv28UpgradeUnix     int64 = 1778162400
 	nv28Codename              = "Fire Horse"
+
+	targetBlocksPerEpoch = 5
+	tipsetWindowSize     = 60 // last N tipsets we keep for KPI sparklines
 )
 
-// ----------------------------------------------------------------------------
 // Config
-// ----------------------------------------------------------------------------
 
 type config struct {
 	addr      string
@@ -76,9 +89,9 @@ func envOr(k, d string) string {
 	return d
 }
 
-// ----------------------------------------------------------------------------
-// Lotus RPC client
-// ----------------------------------------------------------------------------
+// ============================================================================
+// Lotus client
+// ============================================================================
 
 type lotus struct {
 	url    string
@@ -118,7 +131,6 @@ func (l *lotus) call(ctx context.Context, method string, params any, out any) er
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-
 	resp, err := l.hc.Do(req)
 	if err != nil {
 		return err
@@ -129,7 +141,7 @@ func (l *lotus) call(ctx context.Context, method string, params any, out any) er
 		return err
 	}
 	if rr.Error != nil {
-		return fmt.Errorf("lotus rpc %s: %s (code %d)", method, rr.Error.Message, rr.Error.Code)
+		return fmt.Errorf("lotus rpc %s: %s", method, rr.Error.Message)
 	}
 	if out != nil {
 		return json.Unmarshal(rr.Result, out)
@@ -137,9 +149,9 @@ func (l *lotus) call(ctx context.Context, method string, params any, out any) er
 	return nil
 }
 
-// ----------------------------------------------------------------------------
-// Filfox proxy client
-// ----------------------------------------------------------------------------
+// ============================================================================
+// Filfox client
+// ============================================================================
 
 type filfox struct {
 	base string
@@ -175,9 +187,9 @@ func (f *filfox) get(ctx context.Context, path string, q url.Values, out any) er
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// ----------------------------------------------------------------------------
-// Cache wrapper
-// ----------------------------------------------------------------------------
+// ============================================================================
+// Caching
+// ============================================================================
 
 type cached[T any] struct {
 	ttl   time.Duration
@@ -186,6 +198,8 @@ type cached[T any] struct {
 	val   T
 	fetch func(context.Context) (T, error)
 	set   bool
+	last  time.Time
+	err   error
 }
 
 func newCached[T any](ttl time.Duration, fetch func(context.Context) (T, error)) *cached[T] {
@@ -199,9 +213,11 @@ func (c *cached[T]) Get(ctx context.Context) (T, error) {
 		return c.val, nil
 	}
 	v, err := c.fetch(ctx)
+	c.last = time.Now()
 	if err != nil {
+		c.err = err
 		if c.set {
-			log.Printf("cache miss fetch failed, serving stale (%v)", err)
+			log.Printf("cache stale-on-error (%v)", err)
 			return c.val, nil
 		}
 		var zero T
@@ -210,10 +226,10 @@ func (c *cached[T]) Get(ctx context.Context) (T, error) {
 	c.val = v
 	c.exp = time.Now().Add(c.ttl)
 	c.set = true
+	c.err = nil
 	return v, nil
 }
 
-// keyed cache: same fetch fn taking a string param
 type kcached[T any] struct {
 	ttl   time.Duration
 	mu    sync.Mutex
@@ -238,47 +254,42 @@ func (c *kcached[T]) Get(ctx context.Context, key string) (T, error) {
 		e = &kentry[T]{}
 		c.items[key] = e
 	}
-	c.mu.Unlock()
-
-	c.mu.Lock()
 	if e.set && time.Now().Before(e.exp) {
 		v := e.val
 		c.mu.Unlock()
 		return v, nil
 	}
 	c.mu.Unlock()
-
 	v, err := c.fetch(ctx, key)
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if err != nil {
-		c.mu.Lock()
-		defer c.mu.Unlock()
 		if e.set {
 			return e.val, nil
 		}
 		var zero T
 		return zero, err
 	}
-	c.mu.Lock()
 	e.val = v
 	e.exp = time.Now().Add(c.ttl)
 	e.set = true
-	c.mu.Unlock()
 	return v, nil
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // Domain types
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 type tipsetHead struct {
-	Height int64 `json:"Height"`
-	Cids   []struct {
-		Slash string `json:"/"`
-	} `json:"Cids"`
+	Height int64    `json:"Height"`
+	Cids   []map[string]string `json:"Cids"`
 	Blocks []struct {
 		Miner         string `json:"Miner"`
 		Timestamp     int64  `json:"Timestamp"`
 		ParentBaseFee string `json:"ParentBaseFee"`
+		ElectionProof struct {
+			WinCount int `json:"WinCount"`
+		} `json:"ElectionProof"`
 	} `json:"Blocks"`
 }
 
@@ -293,10 +304,7 @@ type powerActorState struct {
 		ThisEpochRawBytePower    string `json:"ThisEpochRawBytePower"`
 		MinerCount               int64  `json:"MinerCount"`
 		MinerAboveMinPowerCount  int64  `json:"MinerAboveMinPowerCount"`
-		RampStartEpoch           int64  `json:"RampStartEpoch"`
-		RampDurationEpochs       int64  `json:"RampDurationEpochs"`
 	} `json:"State"`
-	Balance string `json:"Balance"`
 }
 
 type rewardActorState struct {
@@ -307,30 +315,196 @@ type rewardActorState struct {
 			PositionEstimate string `json:"PositionEstimate"`
 			VelocityEstimate string `json:"VelocityEstimate"`
 		} `json:"ThisEpochRewardSmoothed"`
-		Epoch                   int64  `json:"Epoch"`
-		EffectiveBaselinePower  string `json:"EffectiveBaselinePower"`
-		TotalStoragePowerReward string `json:"TotalStoragePowerReward"`
-		CumsumBaseline          string `json:"CumsumBaseline"`
-		CumsumRealized          string `json:"CumsumRealized"`
+		Epoch int64 `json:"Epoch"`
 	} `json:"State"`
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
+// Tipset ring buffer (last N tipsets, used for sparklines + null-round detection)
+// ============================================================================
+
+type tipsetSample struct {
+	Height       int64  `json:"height"`
+	Timestamp    int64  `json:"timestamp"`
+	BlockCount   int    `json:"blockCount"`
+	BaseFeeAtto  string `json:"baseFeeAtto"`
+	WinCountSum  int    `json:"winCountSum"`
+}
+
+type tipsetRing struct {
+	mu      sync.Mutex
+	samples []tipsetSample
+	maxAge  time.Duration
+	rpc     *lotus
+	headFn  func(context.Context) (tipsetHead, error)
+}
+
+func newTipsetRing(rpc *lotus, headFn func(context.Context) (tipsetHead, error)) *tipsetRing {
+	return &tipsetRing{
+		samples: make([]tipsetSample, 0, tipsetWindowSize+8),
+		rpc:     rpc,
+		headFn:  headFn,
+	}
+}
+
+func (r *tipsetRing) snapshot() []tipsetSample {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]tipsetSample, len(r.samples))
+	copy(out, r.samples)
+	return out
+}
+
+// fetchTipsetByHeight queries Lotus for a specific tipset.
+func (r *tipsetRing) fetchTipsetByHeight(ctx context.Context, height int64) (*tipsetSample, error) {
+	var t tipsetHead
+	err := r.rpc.call(ctx, "Filecoin.ChainGetTipSetByHeight", []any{height, nil}, &t)
+	if err != nil {
+		return nil, err
+	}
+	if len(t.Blocks) == 0 {
+		// null round
+		return &tipsetSample{Height: height, BlockCount: 0}, nil
+	}
+	winSum := 0
+	for _, b := range t.Blocks {
+		winSum += b.ElectionProof.WinCount
+	}
+	bf := ""
+	if len(t.Blocks) > 0 {
+		bf = t.Blocks[0].ParentBaseFee
+	}
+	return &tipsetSample{
+		Height:      t.Height,
+		Timestamp:   t.Blocks[0].Timestamp,
+		BlockCount:  len(t.Blocks),
+		BaseFeeAtto: bf,
+		WinCountSum: winSum,
+	}, nil
+}
+
+// refresh syncs the ring buffer with chain head, filling gaps.
+func (r *tipsetRing) refresh(ctx context.Context) error {
+	head, err := r.headFn(ctx)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// determine the range we need
+	var lastHeight int64
+	if len(r.samples) > 0 {
+		lastHeight = r.samples[len(r.samples)-1].Height
+	} else {
+		lastHeight = head.Height - tipsetWindowSize
+	}
+	startHeight := lastHeight + 1
+	if startHeight < head.Height-tipsetWindowSize {
+		startHeight = head.Height - tipsetWindowSize
+	}
+
+	// Fetch missing tipsets (release lock during network calls)
+	r.mu.Unlock()
+	missing := []tipsetSample{}
+	for h := startHeight; h <= head.Height; h++ {
+		s, err := r.fetchTipsetByHeight(ctx, h)
+		if err != nil {
+			// Treat fetch errors at the tip as null rounds rather than failing the whole refresh.
+			missing = append(missing, tipsetSample{Height: h, BlockCount: 0})
+			continue
+		}
+		missing = append(missing, *s)
+	}
+	r.mu.Lock()
+
+	// Append + trim
+	r.samples = append(r.samples, missing...)
+	if n := len(r.samples) - tipsetWindowSize; n > 0 {
+		r.samples = r.samples[n:]
+	}
+	return nil
+}
+
+// ============================================================================
+// IP calculation - actor v17
+// ============================================================================
+
+const (
+	epochsPerDay       = 2880
+	ipProjectionPeriod = 20 * epochsPerDay
+	atto               = 1_000_000_000_000_000_000
+)
+
+var q128 = new(big.Int).Lsh(big.NewInt(1), 128)
+
+func filterEstimate(positionStr string) (*big.Int, error) {
+	pos, ok := new(big.Int).SetString(positionStr, 10)
+	if !ok {
+		return nil, fmt.Errorf("bad positionEstimate %q", positionStr)
+	}
+	return new(big.Int).Quo(pos, q128), nil
+}
+
+func initialPledgeForCCSector(pwr powerActorState, rwd rewardActorState, circulatingSupply *big.Int) (storage, consensus, total *big.Int, err error) {
+	const sectorBytes = int64(32 * 1024 * 1024 * 1024)
+	sectorQAP := big.NewInt(sectorBytes)
+
+	rwdEst, err := filterEstimate(rwd.State.ThisEpochRewardSmoothed.PositionEstimate)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	netQAP, err := filterEstimate(pwr.State.ThisEpochQAPowerSmoothed.PositionEstimate)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if netQAP.Sign() == 0 {
+		return nil, nil, nil, errors.New("network QAP estimate is zero")
+	}
+	baseline, ok := new(big.Int).SetString(rwd.State.ThisEpochBaselinePower, 10)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("bad baseline power %q", rwd.State.ThisEpochBaselinePower)
+	}
+	storage = new(big.Int).Mul(rwdEst, sectorQAP)
+	storage.Quo(storage, netQAP)
+	storage.Mul(storage, big.NewInt(int64(ipProjectionPeriod)))
+	if circulatingSupply == nil {
+		circulatingSupply = big.NewInt(0)
+	}
+	denom := new(big.Int).Set(netQAP)
+	if baseline.Cmp(denom) > 0 {
+		denom.Set(baseline)
+	}
+	denom.Mul(denom, big.NewInt(100))
+	num := new(big.Int).Mul(circulatingSupply, sectorQAP)
+	num.Mul(num, big.NewInt(30))
+	consensus = new(big.Int).Quo(num, denom)
+	total = new(big.Int).Add(storage, consensus)
+	if total.Sign() < 0 {
+		total.SetInt64(0)
+	}
+	return storage, consensus, total, nil
+}
+
+// ============================================================================
 // Application
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 type app struct {
-	cfg            config
-	rpc            *lotus
-	ff             *filfox
-	head           *cached[tipsetHead]
-	power          *cached[powerActorState]
-	reward         *cached[rewardActorState]
-	netver         *cached[int]
-	topMiners      *cached[json.RawMessage]
-	richList       *cached[json.RawMessage]
-	powerHistory   *kcached[json.RawMessage]
-	fevmStats      *cached[json.RawMessage]
+	cfg          config
+	rpc          *lotus
+	ff           *filfox
+	head         *cached[tipsetHead]
+	power        *cached[powerActorState]
+	reward       *cached[rewardActorState]
+	netver       *cached[int]
+	topMiners    *cached[json.RawMessage]
+	richList     *cached[json.RawMessage]
+	powerHistory *kcached[json.RawMessage]
+	fevmStats    *cached[json.RawMessage]
+	ring         *tipsetRing
+	ringRefresh  time.Time
+	ringMu       sync.Mutex
 }
 
 func newApp(cfg config) *app {
@@ -385,140 +559,318 @@ func newApp(cfg config) *app {
 		return raw, err
 	})
 
+	a.ring = newTipsetRing(a.rpc, a.head.Get)
+
+	// Background tipset refresh every 30s
+	go func() {
+		ctx := context.Background()
+		first := true
+		for {
+			if !first {
+				time.Sleep(30 * time.Second)
+			}
+			first = false
+			if err := a.ring.refresh(ctx); err != nil {
+				log.Printf("tipset ring refresh: %v", err)
+			}
+		}
+	}()
+
 	return a
 }
 
-// ----------------------------------------------------------------------------
-// IP calculation - actor v17 formula
-// ----------------------------------------------------------------------------
+// ============================================================================
+// Status engine
+// ============================================================================
+
+type statusLevel string
 
 const (
-	epochsPerDay       = 2880
-	ipProjectionPeriod = 20 * epochsPerDay
-	atto               = 1_000_000_000_000_000_000
+	statusOperational statusLevel = "operational"
+	statusWatch       statusLevel = "watch"
+	statusDegraded    statusLevel = "degraded"
+	statusUpgrade     statusLevel = "upgrade"
 )
 
-var q128 = new(big.Int).Lsh(big.NewInt(1), 128)
-
-func filterEstimate(positionStr string) (*big.Int, error) {
-	pos, ok := new(big.Int).SetString(positionStr, 10)
-	if !ok {
-		return nil, fmt.Errorf("bad positionEstimate %q", positionStr)
-	}
-	return new(big.Int).Quo(pos, q128), nil
+type statusResp struct {
+	Level             statusLevel `json:"level"`
+	Headline          string      `json:"headline"`
+	Detail            string      `json:"detail"`
+	Epoch             int64       `json:"epoch"`
+	Height            int64       `json:"height"`
+	NetworkVersion    int         `json:"networkVersion"`
+	HeadAgeSeconds    int64       `json:"headAgeSeconds"`
+	UpgradeName       string      `json:"upgradeName"`
+	UpgradeEpoch      int64       `json:"upgradeEpoch"`
+	UpgradeUnix       int64       `json:"upgradeUnix"`
+	UpgradeSecsLeft   int64       `json:"upgradeSecsLeft"`
+	UpgradeEpochsLeft int64       `json:"upgradeEpochsLeft"`
+	GeneratedAt       int64       `json:"generatedAt"`
 }
 
-func initialPledgeForCCSector(
-	pwr powerActorState,
-	rwd rewardActorState,
-	circulatingSupply *big.Int,
-) (storage, consensus, total *big.Int, err error) {
-	const sectorBytes = int64(32 * 1024 * 1024 * 1024)
-	sectorQAP := big.NewInt(sectorBytes)
-
-	rwdEst, err := filterEstimate(rwd.State.ThisEpochRewardSmoothed.PositionEstimate)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("reward estimate: %w", err)
-	}
-	netQAP, err := filterEstimate(pwr.State.ThisEpochQAPowerSmoothed.PositionEstimate)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("network QAP estimate: %w", err)
-	}
-	if netQAP.Sign() == 0 {
-		return nil, nil, nil, errors.New("network QAP estimate is zero")
-	}
-	baseline, ok := new(big.Int).SetString(rwd.State.ThisEpochBaselinePower, 10)
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("bad baseline power %q", rwd.State.ThisEpochBaselinePower)
-	}
-
-	storage = new(big.Int).Mul(rwdEst, sectorQAP)
-	storage.Quo(storage, netQAP)
-	storage.Mul(storage, big.NewInt(int64(ipProjectionPeriod)))
-
-	if circulatingSupply == nil {
-		circulatingSupply = big.NewInt(0)
-	}
-	denom := new(big.Int).Set(netQAP)
-	if baseline.Cmp(denom) > 0 {
-		denom.Set(baseline)
-	}
-	denom.Mul(denom, big.NewInt(100))
-	num := new(big.Int).Mul(circulatingSupply, sectorQAP)
-	num.Mul(num, big.NewInt(30))
-	consensus = new(big.Int).Quo(num, denom)
-
-	total = new(big.Int).Add(storage, consensus)
-	if total.Sign() < 0 {
-		total.SetInt64(0)
-	}
-	return storage, consensus, total, nil
-}
-
-// ----------------------------------------------------------------------------
-// Handlers
-// ----------------------------------------------------------------------------
-
-type overviewResp struct {
-	Height                int64   `json:"height"`
-	Epoch                 int64   `json:"epoch"`
-	NetworkVersion        int     `json:"networkVersion"`
-	NetworkRawBytePower   string  `json:"networkRawBytePower"`
-	NetworkQualityAdjPwr  string  `json:"networkQualityAdjPower"`
-	BaselinePower         string  `json:"baselinePower"`
-	BlockReward           string  `json:"blockReward"`
-	TotalPledgeCollateral string  `json:"totalPledgeCollateral"`
-	MinerCount            int64   `json:"minerCount"`
-	MinersAboveMinPower   int64   `json:"minersAboveMinPower"`
-	IPPerCCSectorAtto     string  `json:"ipPerCCSectorAtto"`
-	IPPerCCSectorFIL      float64 `json:"ipPerCCSectorFIL"`
-	IPStorageTermAtto     string  `json:"ipStorageTermAtto"`
-	IPConsensusTermAtto   string  `json:"ipConsensusTermAtto"`
-	GeneratedAt           int64   `json:"generatedAt"`
-}
-
-func (a *app) handleOverview(w http.ResponseWriter, r *http.Request) {
+func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	head, err := a.head.Get(ctx)
 	if err != nil {
-		writeError(w, 502, "fetch head: "+err.Error())
-		return
-	}
-	pwr, err := a.power.Get(ctx)
-	if err != nil {
-		writeError(w, 502, "fetch power: "+err.Error())
-		return
-	}
-	rwd, err := a.reward.Get(ctx)
-	if err != nil {
-		writeError(w, 502, "fetch reward: "+err.Error())
+		writeError(w, 502, err.Error())
 		return
 	}
 	nv, _ := a.netver.Get(ctx)
+	now := time.Now().Unix()
+	headTs := int64(0)
+	if len(head.Blocks) > 0 {
+		headTs = head.Blocks[0].Timestamp
+	}
+	headAge := now - headTs
 
-	storage, consensus, total, err := initialPledgeForCCSector(pwr, rwd, big.NewInt(0))
+	level := statusOperational
+	headline := "All systems operational"
+	detail := fmt.Sprintf("Calibration nv%d producing blocks normally", nv)
+
+	upgradeSecs := nv28UpgradeUnix - now
+	upgradeEpochs := nv28UpgradeEpoch - head.Height
+
+	switch {
+	case headAge > 90:
+		level = statusDegraded
+		headline = "Chain head is stale"
+		detail = fmt.Sprintf("No new tipsets in %d seconds. Possible sync lag or chain stall.", headAge)
+	case headAge > 60:
+		level = statusWatch
+		headline = "Tipset cadence slowing"
+		detail = fmt.Sprintf("Last tipset arrived %d seconds ago (target 30 seconds).", headAge)
+	case upgradeSecs > 0 && upgradeSecs < 24*3600:
+		level = statusUpgrade
+		headline = fmt.Sprintf("%s upgrade in <24h", nv28Codename)
+		detail = fmt.Sprintf("Network version %d activates at epoch %d, in %s.", 28, nv28UpgradeEpoch, humanDuration(upgradeSecs))
+	case upgradeSecs > 0 && upgradeSecs < 72*3600:
+		level = statusUpgrade
+		headline = fmt.Sprintf("%s upgrade approaching", nv28Codename)
+		detail = fmt.Sprintf("Network version %d activates in %s.", 28, humanDuration(upgradeSecs))
+	}
+
+	writeJSON(w, 200, statusResp{
+		Level:             level,
+		Headline:          headline,
+		Detail:            detail,
+		Epoch:             head.Height,
+		Height:            head.Height,
+		NetworkVersion:    nv,
+		HeadAgeSeconds:    headAge,
+		UpgradeName:       nv28Codename,
+		UpgradeEpoch:      nv28UpgradeEpoch,
+		UpgradeUnix:       nv28UpgradeUnix,
+		UpgradeSecsLeft:   upgradeSecs,
+		UpgradeEpochsLeft: upgradeEpochs,
+		GeneratedAt:       time.Now().Unix(),
+	})
+}
+
+func humanDuration(secs int64) string {
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	if secs < 3600 {
+		return fmt.Sprintf("%dm", secs/60)
+	}
+	if secs < 86400 {
+		return fmt.Sprintf("%dh %dm", secs/3600, (secs%3600)/60)
+	}
+	d := secs / 86400
+	h := (secs % 86400) / 3600
+	return fmt.Sprintf("%dd %dh", d, h)
+}
+
+// ============================================================================
+// Signals (KPI grid + sparkline data)
+// ============================================================================
+
+type signalsResp struct {
+	GeneratedAt   int64                `json:"generatedAt"`
+	Epoch         int64                `json:"epoch"`
+	Window        int                  `json:"window"`
+	BlocksPerEp   signalNum            `json:"blocksPerEpoch"`
+	NullRoundPct  signalNum            `json:"nullRoundPercent"`
+	BaseFee       signalNum            `json:"baseFee"`
+	WinCountAvg   signalNum            `json:"winCountAvg"`
+	NetworkQAP    signalNum            `json:"networkQAP"`
+	ActiveMiners  signalNum            `json:"activeMiners"`
+	TotalPledge   signalNum            `json:"totalPledge"`
+	IPPerSector   signalNum            `json:"ipPerSector32GiB"`
+	Series        map[string][]float64 `json:"series"`
+}
+
+type signalNum struct {
+	Value  float64 `json:"value"`
+	Unit   string  `json:"unit"`
+	Status string  `json:"status"` // ok | watch | bad
+}
+
+func (a *app) handleSignals(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	head, err := a.head.Get(ctx)
 	if err != nil {
-		writeError(w, 500, "compute IP: "+err.Error())
+		writeError(w, 502, err.Error())
 		return
 	}
-	totalFIL, _ := new(big.Float).Quo(new(big.Float).SetInt(total), big.NewFloat(atto)).Float64()
+	pwr, _ := a.power.Get(ctx)
+	rwd, _ := a.reward.Get(ctx)
 
-	writeJSON(w, 200, overviewResp{
-		Height:                head.Height,
-		Epoch:                 rwd.State.Epoch,
-		NetworkVersion:        nv,
-		NetworkRawBytePower:   pwr.State.ThisEpochRawBytePower,
-		NetworkQualityAdjPwr:  pwr.State.ThisEpochQualityAdjPower,
-		BaselinePower:         rwd.State.ThisEpochBaselinePower,
-		BlockReward:           rwd.State.ThisEpochReward,
-		TotalPledgeCollateral: pwr.State.ThisEpochPledgeCollateral,
-		MinerCount:            pwr.State.MinerCount,
-		MinersAboveMinPower:   pwr.State.MinerAboveMinPowerCount,
-		IPPerCCSectorAtto:     total.String(),
-		IPPerCCSectorFIL:      totalFIL,
-		IPStorageTermAtto:     storage.String(),
-		IPConsensusTermAtto:   consensus.String(),
-		GeneratedAt:           time.Now().Unix(),
+	samples := a.ring.snapshot()
+	n := len(samples)
+	resp := signalsResp{
+		GeneratedAt: time.Now().Unix(),
+		Epoch:       head.Height,
+		Window:      n,
+		Series:      map[string][]float64{},
+	}
+
+	// Compute over the window
+	var (
+		blocksPerEp = make([]float64, 0, n)
+		baseFees    = make([]float64, 0, n)
+		winCounts   = make([]float64, 0, n)
+		nullRounds  = 0
+	)
+
+	for _, s := range samples {
+		blocksPerEp = append(blocksPerEp, float64(s.BlockCount))
+		winCounts = append(winCounts, float64(s.WinCountSum))
+		if s.BlockCount == 0 {
+			nullRounds++
+		}
+		if s.BaseFeeAtto != "" {
+			bf, _ := strconv.ParseFloat(s.BaseFeeAtto, 64)
+			baseFees = append(baseFees, bf) // raw attoFIL; the dashboard formats it adaptively
+		}
+	}
+
+	// Calibration cadence is much lower than mainnet because there are ~12 active miners.
+	// Healthy steady state has been around 1.8-2.5 blocks/epoch. Use thresholds tuned for that.
+	avgBlocksPerEp := mean(blocksPerEp)
+	resp.BlocksPerEp = signalNum{
+		Value:  avgBlocksPerEp,
+		Unit:   "blocks",
+		Status: classify(avgBlocksPerEp, 1.5, 1.0, true),
+	}
+	nullPct := 0.0
+	if n > 0 {
+		nullPct = float64(nullRounds) * 100 / float64(n)
+	}
+	resp.NullRoundPct = signalNum{
+		Value:  nullPct,
+		Unit:   "%",
+		Status: classify(nullPct, 5, 15, false),
+	}
+	resp.BaseFee = signalNum{
+		Value:  mean(baseFees),
+		Unit:   "atto",
+		Status: "ok",
+	}
+	avgWin := mean(winCounts)
+	resp.WinCountAvg = signalNum{
+		Value:  avgWin,
+		Unit:   "wins",
+		Status: classify(avgWin, 3, 1.5, true),
+	}
+
+	// Network QAP from latest power state
+	qapBytes, _ := strconv.ParseFloat(pwr.State.ThisEpochQualityAdjPower, 64)
+	resp.NetworkQAP = signalNum{
+		Value:  qapBytes / float64(int64(1)<<40),
+		Unit:   "TiB",
+		Status: "ok",
+	}
+	resp.ActiveMiners = signalNum{
+		Value:  float64(pwr.State.MinerAboveMinPowerCount),
+		Unit:   "miners",
+		Status: classify(float64(pwr.State.MinerAboveMinPowerCount), 10, 5, true),
+	}
+	tpc, _ := new(big.Float).SetString(pwr.State.ThisEpochPledgeCollateral)
+	if tpc != nil {
+		f, _ := tpc.Quo(tpc, big.NewFloat(atto)).Float64()
+		resp.TotalPledge = signalNum{Value: f, Unit: "FIL", Status: "ok"}
+	}
+
+	storage, _, total, err := initialPledgeForCCSector(pwr, rwd, big.NewInt(0))
+	if err == nil {
+		fil, _ := new(big.Float).Quo(new(big.Float).SetInt(total), big.NewFloat(atto)).Float64()
+		resp.IPPerSector = signalNum{Value: fil, Unit: "FIL/32GiB", Status: "ok"}
+		_ = storage
+	}
+
+	// Series for sparklines
+	resp.Series["blocksPerEpoch"] = blocksPerEp
+	resp.Series["baseFeeNFil"] = baseFees
+	resp.Series["winCountSum"] = winCounts
+
+	writeJSON(w, 200, resp)
+}
+
+func mean(xs []float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	s := 0.0
+	for _, x := range xs {
+		s += x
+	}
+	return s / float64(len(xs))
+}
+
+// classify returns ok/watch/bad based on thresholds.
+// If higherIsBetter, ok when v >= okT; watch when v >= warnT; bad otherwise.
+// If !higherIsBetter, ok when v <= okT; watch when v <= warnT; bad otherwise.
+func classify(v, okT, warnT float64, higherIsBetter bool) string {
+	if higherIsBetter {
+		switch {
+		case v >= okT:
+			return "ok"
+		case v >= warnT:
+			return "watch"
+		default:
+			return "bad"
+		}
+	}
+	switch {
+	case v <= okT:
+		return "ok"
+	case v <= warnT:
+		return "watch"
+	default:
+		return "bad"
+	}
+}
+
+// classifyAround returns ok if |v - target| <= okBand, watch if <= warnBand, bad otherwise.
+func classifyAround(v, target, okBand, warnBand float64) string {
+	d := v - target
+	if d < 0 {
+		d = -d
+	}
+	switch {
+	case d <= okBand:
+		return "ok"
+	case d <= warnBand:
+		return "watch"
+	default:
+		return "bad"
+	}
+}
+
+// ============================================================================
+// Other handlers
+// ============================================================================
+
+func (a *app) handleHealth(w http.ResponseWriter, r *http.Request) {
+	a.ringMu.Lock()
+	last := a.ringRefresh
+	a.ringMu.Unlock()
+	writeJSON(w, 200, map[string]any{
+		"ok":        true,
+		"ts":        time.Now().Unix(),
+		"ringSize":  len(a.ring.snapshot()),
+		"ringFresh": time.Since(last).Seconds(),
 	})
 }
 
@@ -531,33 +883,9 @@ func (a *app) handleVersion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *app) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"ok": true, "ts": time.Now().Unix()})
-}
-
-func (a *app) handleBlocksRecent(w http.ResponseWriter, r *http.Request) {
-	head, err := a.head.Get(r.Context())
-	if err != nil {
-		writeError(w, 502, err.Error())
-		return
-	}
-	blocks := make([]map[string]any, 0, len(head.Blocks))
-	for _, b := range head.Blocks {
-		blocks = append(blocks, map[string]any{
-			"miner":         b.Miner,
-			"timestamp":     b.Timestamp,
-			"parentBaseFee": b.ParentBaseFee,
-		})
-	}
-	writeJSON(w, 200, map[string]any{"height": head.Height, "blocks": blocks})
-}
-
-// /api/v1/upgrade — Nv28 Fire Horse countdown source of truth.
 func (a *app) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 	head, _ := a.head.Get(r.Context())
 	now := time.Now().Unix()
-	secsLeft := nv28UpgradeUnix - now
-	epochsLeft := nv28UpgradeEpoch - head.Height
 	writeJSON(w, 200, map[string]any{
 		"name":           "Fire Horse",
 		"networkVersion": 28,
@@ -567,33 +895,30 @@ func (a *app) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		"timestampISO":   time.Unix(nv28UpgradeUnix, 0).UTC().Format(time.RFC3339),
 		"announcement":   "https://github.com/filecoin-project/community/discussions/74#discussioncomment-16540452",
 		"currentEpoch":   head.Height,
-		"epochsLeft":     epochsLeft,
-		"secondsLeft":    secsLeft,
+		"epochsLeft":     nv28UpgradeEpoch - head.Height,
+		"secondsLeft":    nv28UpgradeUnix - now,
 		"genesisUnix":    calibGenesisUnix,
 		"epochSeconds":   calibBlockDelaySecs,
 	})
 }
 
+func (a *app) handleTipsetsRecent(w http.ResponseWriter, r *http.Request) {
+	samples := a.ring.snapshot()
+	writeJSON(w, 200, map[string]any{
+		"window":    len(samples),
+		"tipsets":   samples,
+		"updatedAt": time.Now().Unix(),
+	})
+}
+
 func (a *app) handleTopMiners(w http.ResponseWriter, r *http.Request) {
 	v, err := a.topMiners.Get(r.Context())
-	if err != nil {
-		writeError(w, 502, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, _ = w.Write(v)
+	writeRaw(w, v, err)
 }
 
 func (a *app) handleRichList(w http.ResponseWriter, r *http.Request) {
 	v, err := a.richList.Get(r.Context())
-	if err != nil {
-		writeError(w, 502, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, _ = w.Write(v)
+	writeRaw(w, v, err)
 }
 
 func (a *app) handlePowerHistory(w http.ResponseWriter, r *http.Request) {
@@ -606,46 +931,43 @@ func (a *app) handlePowerHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := a.powerHistory.Get(r.Context(), dur)
-	if err != nil {
-		writeError(w, 502, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, _ = w.Write(v)
+	writeRaw(w, v, err)
 }
 
 func (a *app) handleFEVM(w http.ResponseWriter, r *http.Request) {
 	v, err := a.fevmStats.Get(r.Context())
-	if err != nil {
-		writeError(w, 502, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, _ = w.Write(v)
+	writeRaw(w, v, err)
 }
 
 func (a *app) handleFaucet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"name":        "Plumbline",
 		"url":         a.cfg.faucetURL,
+		"status":      a.cfg.faucetURL + "/status",
 		"description": "Calibration tFIL + USDFC faucet, dispensed independently.",
 	})
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // Plumbing
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }
-
 func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]any{"error": msg})
+}
+func writeRaw(w http.ResponseWriter, v json.RawMessage, err error) {
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, _ = w.Write(v)
 }
 
 func cors(next http.Handler, allow string) http.Handler {
@@ -668,9 +990,10 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", a.handleHealth)
 	mux.HandleFunc("/api/v1/version", a.handleVersion)
-	mux.HandleFunc("/api/v1/overview", a.handleOverview)
-	mux.HandleFunc("/api/v1/blocks/recent", a.handleBlocksRecent)
+	mux.HandleFunc("/api/v1/status", a.handleStatus)
+	mux.HandleFunc("/api/v1/signals", a.handleSignals)
 	mux.HandleFunc("/api/v1/upgrade", a.handleUpgrade)
+	mux.HandleFunc("/api/v1/tipsets/recent", a.handleTipsetsRecent)
 	mux.HandleFunc("/api/v1/miners/top", a.handleTopMiners)
 	mux.HandleFunc("/api/v1/rich-list", a.handleRichList)
 	mux.HandleFunc("/api/v1/power-history", a.handlePowerHistory)
