@@ -10,7 +10,7 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 60'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='0'%3E%3Cstop offset='0%25' stop-color='%236EE7B7'/%3E%3Cstop offset='100%25' stop-color='%2310B981'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg stroke='url(%23g)' stroke-width='4' fill='none' stroke-linecap='square'%3E%3Cpath d='M16 12 L6 12 L6 48 L16 48'/%3E%3Cpath d='M44 12 L54 12 L54 48 L44 48'/%3E%3C/g%3E%3Cpath d='M2 30 L18 30 L22 18 L26 42 L30 24 L34 36 L38 30 L58 30' stroke='%2334D399' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700;9..144,900&family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
     --bg: #06170F;
@@ -37,7 +37,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     background: var(--bg-deep);
     color: var(--text);
     line-height: 1.55;
@@ -82,8 +82,8 @@ body::after {
 
 .container { max-width: 1280px; margin: 0 auto; padding: 0 32px; position: relative; }
 
-.mono { font-family: 'Geist Mono', 'SF Mono', monospace; font-feature-settings: "tnum"; }
-.serif { font-family: 'Fraunces', Georgia, serif; font-feature-settings: "ss01"; letter-spacing: -0.02em; }
+.mono { font-family: 'IBM Plex Mono', 'SF Mono', monospace; font-feature-settings: "tnum"; }
+.display { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.02em; }
 a { color: var(--green-bright); text-decoration: none; transition: opacity 0.2s; }
 a:hover { opacity: 0.7; }
 
@@ -142,13 +142,13 @@ nav.top {
 nav.top .inner { max-width: 1280px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 nav.top .brand { display: flex; align-items: center; gap: 10px; }
 nav.top .brand .mark { width: 28px; height: 28px; }
-nav.top .brand .wm { font-family: 'Fraunces', serif; font-weight: 700; font-size: 19px; letter-spacing: -0.025em; background: var(--grad-text); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+nav.top .brand .wm { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 19px; letter-spacing: -0.025em; background: var(--grad-text); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 nav.top .links { display: flex; gap: 22px; font-size: 13px; }
 nav.top .links a { color: var(--text-dim); }
 nav.top .links a:hover { color: var(--text); opacity: 1; }
 nav.top .live {
     display: flex; align-items: center; gap: 7px;
-    font-family: 'Geist Mono', monospace; font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
     color: var(--text-dim); letter-spacing: 0.04em;
     padding: 6px 10px;
     background: var(--green-glass);
@@ -170,7 +170,7 @@ nav.top .live .dot {
 /* ===== HERO with countdown ===== */
 .hero { padding: 110px 0 32px; position: relative; }
 .hero h1 {
-    font-family: 'Fraunces', serif;
+    font-family: 'Space Grotesk', sans-serif;
     font-size: clamp(40px, 6vw, 76px);
     font-weight: 700;
     line-height: 1.02;
@@ -180,7 +180,7 @@ nav.top .live .dot {
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
 .hero .lede {
-    font-family: 'Fraunces', serif;
+    font-family: 'Space Grotesk', sans-serif;
     font-weight: 500;
     font-size: clamp(17px, 1.7vw, 21px);
     color: var(--text-dim);
@@ -199,7 +199,7 @@ nav.top .live .dot {
     align-items: center;
 }
 .countdown .left .label {
-    font-family: 'Geist Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
@@ -217,7 +217,7 @@ nav.top .live .dot {
     letter-spacing: 0.1em;
 }
 .countdown .name {
-    font-family: 'Fraunces', serif;
+    font-family: 'Space Grotesk', sans-serif;
     font-weight: 700;
     font-size: clamp(28px, 4vw, 44px);
     letter-spacing: -0.025em;
@@ -226,11 +226,11 @@ nav.top .live .dot {
     background: var(--grad-text);
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
-.countdown .meta { font-family: 'Geist Mono', monospace; font-size: 12.5px; color: var(--text-soft); line-height: 1.7; }
+.countdown .meta { font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--text-soft); line-height: 1.7; }
 .countdown .meta a { color: var(--green-bright); }
 .countdown .timer {
     display: flex; gap: 12px;
-    font-family: 'Fraunces', serif; font-feature-settings: "tnum";
+    font-family: 'Space Grotesk', sans-serif; font-feature-settings: "tnum";
 }
 .countdown .timer .seg {
     text-align: center;
@@ -241,7 +241,7 @@ nav.top .live .dot {
     border-radius: 12px;
 }
 .countdown .timer .num { font-size: 36px; font-weight: 700; line-height: 1; letter-spacing: -0.02em; color: var(--text); }
-.countdown .timer .lbl { font-family: 'Geist Mono', monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-soft); margin-top: 6px; }
+.countdown .timer .lbl { font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-soft); margin-top: 6px; }
 @media (max-width: 760px) {
     .countdown { grid-template-columns: 1fr; }
     .countdown .timer .seg { min-width: 0; padding: 10px 8px; }
@@ -250,7 +250,7 @@ nav.top .live .dot {
 
 /* ===== SECTION HEADER ===== */
 h2.section {
-    font-family: 'Inter', sans-serif;
+    font-family: 'DM Sans', sans-serif;
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
@@ -264,6 +264,7 @@ h2.section::before {
     width: 24px; height: 1px;
     background: linear-gradient(90deg, var(--green-bright), transparent);
 }
+.emoji { font-size: 1.15em; line-height: 1; letter-spacing: 0; filter: saturate(1.05); margin-right: 2px; }
 
 /* ===== HEADLINE IP CARD ===== */
 .headline {
@@ -274,14 +275,14 @@ h2.section::before {
     gap: 32px;
     align-items: center;
 }
-.headline .label { font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--green-bright); margin-bottom: 12px; }
-.headline .big { font-family: 'Fraunces', serif; font-size: clamp(48px, 6.5vw, 74px); font-weight: 700; letter-spacing: -0.03em; color: var(--text); line-height: 1; font-feature-settings: "tnum"; }
+.headline .label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--green-bright); margin-bottom: 12px; }
+.headline .big { font-family: 'Space Grotesk', sans-serif; font-size: clamp(48px, 6.5vw, 74px); font-weight: 700; letter-spacing: -0.03em; color: var(--text); line-height: 1; font-feature-settings: "tnum"; }
 .headline .unit { color: var(--text-soft); font-weight: 400; font-size: 0.5em; margin-left: 6px; }
-.headline .compare { font-family: 'Geist Mono', monospace; font-size: 12.5px; color: var(--text-dim); margin-top: 18px; line-height: 1.85; }
+.headline .compare { font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--text-dim); margin-top: 18px; line-height: 1.85; }
 .headline .compare .filfox { color: var(--red); }
 .headline .compare .ours { color: var(--green-bright); }
 .headline-decomp { display: flex; flex-direction: column; gap: 8px; min-width: 240px; }
-.headline-decomp .row { display: flex; justify-content: space-between; gap: 16px; padding: 12px 16px; background: rgba(255,255,255,0.04); border: 1px solid var(--white-glass); border-radius: 10px; font-family: 'Geist Mono', monospace; font-size: 12.5px; }
+.headline-decomp .row { display: flex; justify-content: space-between; gap: 16px; padding: 12px 16px; background: rgba(255,255,255,0.04); border: 1px solid var(--white-glass); border-radius: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; }
 .headline-decomp .row .k { color: var(--text-soft); }
 .headline-decomp .row .v { color: var(--text); font-weight: 500; }
 @media (max-width: 760px) { .headline { grid-template-columns: 1fr; } }
@@ -289,35 +290,35 @@ h2.section::before {
 /* ===== STAT CARD GRID ===== */
 .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .card { padding: 20px 22px; }
-.card .lbl { font-family: 'Geist Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--text-soft); margin-bottom: 10px; }
-.card .val { font-family: 'Fraunces', serif; font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; font-feature-settings: "tnum"; color: var(--text); }
-.card .val .sub { color: var(--text-soft); font-weight: 400; font-size: 14px; font-family: 'Geist Mono', monospace; margin-left: 4px; }
+.card .lbl { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--text-soft); margin-bottom: 10px; }
+.card .val { font-family: 'Space Grotesk', sans-serif; font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; font-feature-settings: "tnum"; color: var(--text); }
+.card .val .sub { color: var(--text-soft); font-weight: 400; font-size: 14px; font-family: 'IBM Plex Mono', monospace; margin-left: 4px; }
 .card .val.green { background: var(--grad-text); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-.card .delta { font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--text-soft); margin-top: 6px; }
+.card .delta { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-soft); margin-top: 6px; }
 @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, 1fr); } }
 
 /* ===== CHART (network power over 24h) ===== */
 .chart-card { padding: 24px 28px; margin-top: 12px; }
 .chart-card .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
-.chart-card .title { font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--green-bright); }
-.chart-card .sub { font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--text-soft); }
+.chart-card .title { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--green-bright); }
+.chart-card .sub { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-soft); }
 .chart-card svg { width: 100%; height: 240px; display: block; }
 .chart-card svg .area { fill: url(#chart-fill); opacity: 0.5; }
 .chart-card svg .line { stroke: url(#chart-stroke); stroke-width: 2; fill: none; }
 .chart-card svg .grid line { stroke: rgba(255,255,255,0.05); stroke-width: 1; }
-.chart-card svg .axis { fill: var(--text-soft); font-family: 'Geist Mono', monospace; font-size: 10px; }
+.chart-card svg .axis { fill: var(--text-soft); font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
 
 /* ===== TABLES (top miners + rich list) ===== */
 .tables { display: grid; grid-template-columns: 1.1fr 1fr; gap: 14px; }
 @media (max-width: 1000px) { .tables { grid-template-columns: 1fr; } }
 .tbl { padding: 22px 26px; }
 .tbl .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
-.tbl .title { font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--green-bright); }
-.tbl .updated { font-family: 'Geist Mono', monospace; font-size: 10.5px; color: var(--text-soft); }
+.tbl .title { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--green-bright); }
+.tbl .updated { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: var(--text-soft); }
 .tbl table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.tbl th { text-align: left; font-family: 'Geist Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.13em; color: var(--text-soft); font-weight: 500; padding: 8px 8px; border-bottom: 1px solid var(--white-glass); }
-.tbl th.num, .tbl td.num { text-align: right; font-feature-settings: "tnum"; font-family: 'Geist Mono', monospace; }
-.tbl td { padding: 11px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text-dim); font-family: 'Geist Mono', monospace; }
+.tbl th { text-align: left; font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.13em; color: var(--text-soft); font-weight: 500; padding: 8px 8px; border-bottom: 1px solid var(--white-glass); }
+.tbl th.num, .tbl td.num { text-align: right; font-feature-settings: "tnum"; font-family: 'IBM Plex Mono', monospace; }
+.tbl td { padding: 11px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text-dim); font-family: 'IBM Plex Mono', monospace; }
 .tbl tr:last-child td { border-bottom: none; }
 .tbl tr:hover td { background: rgba(255,255,255,0.025); color: var(--text); }
 .tbl .rank { color: var(--green-bright); font-weight: 600; }
@@ -332,13 +333,13 @@ h2.section::before {
 .tile { padding: 22px 24px; display: flex; flex-direction: column; gap: 10px; }
 .tile .icon-row { display: flex; align-items: center; gap: 10px; }
 .tile .icon-row svg { width: 24px; height: 24px; }
-.tile .title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 22px; letter-spacing: -0.02em; }
-.tile .label { font-family: 'Geist Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--green-bright); }
+.tile .title { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 22px; letter-spacing: -0.02em; }
+.tile .label { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--green-bright); }
 .tile .body { color: var(--text-dim); font-size: 13.5px; line-height: 1.55; }
 .tile .body strong { color: var(--text); font-weight: 600; }
-.tile .stats { display: flex; gap: 18px; font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--text-soft); margin-top: 6px; }
+.tile .stats { display: flex; gap: 18px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text-soft); margin-top: 6px; }
 .tile .stats .v { color: var(--text); font-weight: 500; }
-.tile .cta { font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--green-bright); margin-top: auto; padding-top: 8px; display: flex; align-items: center; gap: 6px; }
+.tile .cta { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--green-bright); margin-top: auto; padding-top: 8px; display: flex; align-items: center; gap: 6px; }
 .tile .cta::after { content: '→'; transition: transform 0.2s; }
 .tile:hover .cta::after { transform: translateX(4px); }
 .tile a { color: inherit; }
@@ -346,8 +347,8 @@ h2.section::before {
 /* ===== Recent blocks strip ===== */
 .blocks-card { padding: 20px 24px; margin-top: 12px; }
 .blocks-card .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
-.blocks-card .title { font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--green-bright); }
-.blocks-card .updated { font-family: 'Geist Mono', monospace; font-size: 10.5px; color: var(--text-soft); }
+.blocks-card .title { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--green-bright); }
+.blocks-card .updated { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: var(--text-soft); }
 .blocks-card ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
 .blocks-card li {
     display: grid;
@@ -357,7 +358,7 @@ h2.section::before {
     background: rgba(255,255,255,0.03);
     border: 1px solid var(--white-glass);
     border-radius: 8px;
-    font-family: 'Geist Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 12.5px;
     transition: border-color 0.2s;
 }
@@ -369,7 +370,7 @@ h2.section::before {
 /* ===== EPOCH CONVERTER ===== */
 .converter { padding: 24px 28px; margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 @media (max-width: 760px) { .converter { grid-template-columns: 1fr; } }
-.converter .head { font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--green-bright); margin-bottom: 14px; }
+.converter .head { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--green-bright); margin-bottom: 14px; }
 .converter input[type="number"], .converter input[type="datetime-local"] {
     width: 100%;
     padding: 12px 14px;
@@ -377,23 +378,23 @@ h2.section::before {
     border: 1px solid var(--white-glass);
     border-radius: 10px;
     color: var(--text);
-    font-family: 'Geist Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 14px;
     transition: border-color 0.2s;
 }
 .converter input:focus { outline: none; border-color: var(--green-bright); background: rgba(255,255,255,0.06); }
-.converter .out { font-family: 'Geist Mono', monospace; font-size: 13px; color: var(--text-dim); margin-top: 10px; min-height: 1.6em; }
+.converter .out { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--text-dim); margin-top: 10px; min-height: 1.6em; }
 .converter .out strong { color: var(--text); }
 
 /* ===== FOOTER ===== */
 footer { margin-top: 80px; padding: 32px 0 48px; color: var(--text-soft); font-size: 13px; }
 footer .row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; padding-top: 24px; border-top: 1px solid var(--white-glass); }
-footer .copy { font-family: 'Geist Mono', monospace; font-size: 11px; }
+footer .copy { font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
 
 .skel { background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.10) 50%, rgba(255,255,255,0.04) 75%); background-size: 200% 100%; animation: shimmer 1.6s infinite; color: transparent; border-radius: 4px; }
 @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 
-.error-banner { background: rgba(248,113,113,0.10); border: 1px solid rgba(248,113,113,0.4); color: #fbb; border-radius: 10px; padding: 12px 16px; margin: 12px 0; font-family: 'Geist Mono', monospace; font-size: 13px; }
+.error-banner { background: rgba(248,113,113,0.10); border: 1px solid rgba(248,113,113,0.4); color: #fbb; border-radius: 10px; padding: 12px 16px; margin: 12px 0; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -433,8 +434,8 @@ footer .copy { font-family: 'Geist Mono', monospace; font-size: 11px; }
 
 <section class="hero">
   <div class="container">
-    <h1>Calibration, but with the right numbers.</h1>
-    <p class="lede">Filecoin calibration testnet, computed on-chain. <em>Initial pledge that matches the actor.</em> Real network state, real miner rankings, no negative FIL.</p>
+    <h1>Filecoin Calibration</h1>
+    <p class="lede">Network state, leaderboards, and tooling for the Filecoin calibration testnet. Part of the wider calibration stability project at <a href="https://reiers.io">reiers.io</a>.</p>
 
     <div id="error-slot"></div>
 
@@ -457,14 +458,13 @@ footer .copy { font-family: 'Geist Mono', monospace; font-size: 11px; }
     </div>
 
     <!-- Headline IP -->
-    <h2 class="section" id="network">The number filfox gets wrong</h2>
+    <h2 class="section" id="network"><span class="emoji">💰</span> Initial pledge</h2>
     <div class="glass headline">
       <div>
-        <div class="label">INITIAL PLEDGE · NEW 32 GiB CC SECTOR</div>
+        <div class="label">PER NEW 32 GiB CC SECTOR</div>
         <div class="big mono"><span id="ip-fil">…</span><span class="unit">FIL</span></div>
         <div class="compare">
-          <div><span class="ours">calix</span>: <span id="ip-fil-precise">…</span> FIL · computed via actor v17 from <code>f04</code> + <code>f02</code> state</div>
-          <div><span class="filfox">filfox</span>: shows a <strong>negative</strong> number because their indexer reports <code>circulatingSupply: 0</code> on calibration</div>
+          Computed on-chain via the actor v17 formula from <code>f04</code> (power) + <code>f02</code> (reward) state. Storage pledge term + consensus pledge term, refreshed every 30 seconds.
         </div>
       </div>
       <div class="headline-decomp">
@@ -475,7 +475,7 @@ footer .copy { font-family: 'Geist Mono', monospace; font-size: 11px; }
     </div>
 
     <!-- Network cards -->
-    <h2 class="section">Network state</h2>
+    <h2 class="section"><span class="emoji">📡</span> Network state</h2>
     <div class="cards">
       <div class="glass card">
         <div class="lbl">Network QAP</div>
@@ -499,7 +499,7 @@ footer .copy { font-family: 'Geist Mono', monospace; font-size: 11px; }
       </div>
     </div>
 
-    <h2 class="section">Pledge &amp; participants</h2>
+    <h2 class="section"><span class="emoji">🔒</span> Pledge &amp; participants</h2>
     <div class="cards">
       <div class="glass card">
         <div class="lbl">Total Pledge Locked</div>
@@ -524,7 +524,7 @@ footer .copy { font-family: 'Geist Mono', monospace; font-size: 11px; }
     </div>
 
     <!-- Power chart -->
-    <h2 class="section" id="chart">Network QAP, last 24h</h2>
+    <h2 class="section" id="chart"><span class="emoji">📈</span> Network QAP, last 24h</h2>
     <div class="glass chart-card">
       <div class="head">
         <div class="title">Quality-Adjusted Power</div>
@@ -549,11 +549,11 @@ footer .copy { font-family: 'Geist Mono', monospace; font-size: 11px; }
     </div>
 
     <!-- Top miners + Rich list -->
-    <h2 class="section" id="miners">Leaderboards</h2>
+    <h2 class="section" id="miners"><span class="emoji">🏆</span> Leaderboards</h2>
     <div class="tables">
       <div class="glass tbl">
         <div class="head">
-          <span class="title">Top miners by power</span>
+          <span class="title"><span class="emoji">⛏️</span> Top miners by power</span>
           <span class="updated" id="miners-updated">—</span>
         </div>
         <table>
@@ -574,7 +574,7 @@ footer .copy { font-family: 'Geist Mono', monospace; font-size: 11px; }
 
       <div class="glass tbl">
         <div class="head">
-          <span class="title">Rich list</span>
+          <span class="title"><span class="emoji">💎</span> Rich list</span>
           <span class="updated" id="rich-updated">—</span>
         </div>
         <table>
@@ -594,7 +594,7 @@ footer .copy { font-family: 'Geist Mono', monospace; font-size: 11px; }
     </div>
 
     <!-- FEVM + Faucet + Recent blocks -->
-    <h2 class="section" id="fevm">Ecosystem</h2>
+    <h2 class="section" id="fevm"><span class="emoji">🌐</span> Ecosystem</h2>
     <div class="tiles">
       <a class="glass tile" href="#" id="fevm-card">
         <div class="icon-row">
@@ -627,7 +627,7 @@ footer .copy { font-family: 'Geist Mono', monospace; font-size: 11px; }
       </a>
     </div>
 
-    <h2 class="section">Recent tipset</h2>
+    <h2 class="section"><span class="emoji">🧊</span> Recent tipset</h2>
     <div class="glass blocks-card">
       <div class="head">
         <span class="title">Latest blocks at head</span>
@@ -639,7 +639,7 @@ footer .copy { font-family: 'Geist Mono', monospace; font-size: 11px; }
     </div>
 
     <!-- Epoch converter -->
-    <h2 class="section" id="tools">Epoch ↔ time</h2>
+    <h2 class="section" id="tools"><span class="emoji">🕰️</span> Epoch ↔ time</h2>
     <div class="glass converter">
       <div>
         <div class="head">Epoch → time</div>
@@ -845,11 +845,13 @@ async function loadOnce() {
     const m = await fetchJSON('/api/v1/miners/top');
     const tb = document.getElementById('miners-tbody');
     tb.innerHTML = '';
+    const minerMedals = ['🥇','🥈','🥉'];
     m.miners.slice(0, 12).forEach((row, i) => {
       const tr = document.createElement('tr');
       const tag = row.tag ? ` <span class="tag">${row.tag.name}</span>` : '';
+      const rankCell = i < 3 ? `<span class="emoji">${minerMedals[i]}</span>` : `#${i+1}`;
       tr.innerHTML = `
-        <td class="rank">#${i+1}</td>
+        <td class="rank">${rankCell}</td>
         <td><span class="addr">${row.address}</span>${tag}</td>
         <td class="num">${fmtBytes(row.rawBytePower)}</td>
         <td class="num">${fmtBytes(row.qualityAdjPower)}</td>
@@ -866,12 +868,14 @@ async function loadOnce() {
     const tb = document.getElementById('rich-tbody');
     tb.innerHTML = '';
     const supply = BigInt(r.totalSupply);
+    const richMedals = ['👑','💎','🏆'];
     r.richList.slice(0, 12).forEach((row, i) => {
       const tr = document.createElement('tr');
       const bal = BigInt(row.balance);
       const pct = Number(bal * 10000n / supply) / 100;
+      const rankCell = i < 3 ? `<span class="emoji">${richMedals[i]}</span>` : `#${i+1}`;
       tr.innerHTML = `
-        <td class="rank">#${i+1}</td>
+        <td class="rank">${rankCell}</td>
         <td><span class="addr">${row.address}</span></td>
         <td class="num">${fmtFILShort(row.balance, 2)}</td>
         <td class="num">${pct.toFixed(2)}%</td>`;
