@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calix &middot; Filecoin Calibration Dashboard</title>
+<meta name="description" content="A no-bullshit dashboard for the Filecoin calibration testnet. Real numbers, computed on-chain.">
+<meta property="og:title" content="Calix">
+<meta property="og:description" content="Filecoin calibration dashboard. Numbers that match the chain.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 60'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='0'%3E%3Cstop offset='0%25' stop-color='%236EE7B7'/%3E%3Cstop offset='100%25' stop-color='%2310B981'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg stroke='url(%23g)' stroke-width='4' fill='none' stroke-linecap='square'%3E%3Cpath d='M16 12 L6 12 L6 48 L16 48'/%3E%3Cpath d='M44 12 L54 12 L54 48 L44 48'/%3E%3C/g%3E%3Cpath d='M2 30 L18 30 L22 18 L26 42 L30 24 L34 36 L38 30 L58 30' stroke='%2334D399' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+    --bg: #08090C;
+    --bg-soft: #0C0E12;
+    --surface: #11141A;
+    --surface2: #161A22;
+    --border: #232830;
+    --border-soft: #1A1E26;
+    --text: #ECEAE0;
+    --dim: #8B8E96;
+    --dim-soft: #5B5E66;
+    --green: #10B981;
+    --mint: #34D399;
+    --emerald: #6EE7B7;
+    --warn: #FBBF24;
+    --red: #F85149;
+    --grad: linear-gradient(110deg, #6EE7B7 0%, #34D399 30%, #10B981 60%, #066346 100%);
+    --grad-soft: linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(8,9,12,0.4) 100%);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+body::before {
+    content: '';
+    position: fixed; inset: 0; pointer-events: none; z-index: 100;
+    opacity: 0.04;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+}
+.container { max-width: 1180px; margin: 0 auto; padding: 0 32px; position: relative; }
+.mono { font-family: 'Geist Mono', 'SF Mono', monospace; font-feature-settings: "tnum"; }
+a { color: var(--mint); text-decoration: none; transition: opacity 0.2s; }
+a:hover { opacity: 0.7; }
+
+/* TOP NAV */
+nav.top {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+    padding: 16px 32px;
+    backdrop-filter: blur(14px) saturate(160%);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    background: rgba(8,9,12,0.7);
+    border-bottom: 1px solid rgba(35,40,48,0.5);
+}
+nav.top .inner { max-width: 1180px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+nav.top .brand { display: flex; align-items: center; gap: 12px; }
+nav.top .brand .mark { width: 32px; height: 32px; }
+nav.top .brand .wm { font-family: 'Fraunces', serif; font-weight: 700; font-size: 22px; letter-spacing: -0.02em; background: var(--grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+nav.top .live { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); font-family: 'Geist Mono', monospace; letter-spacing: 0.04em; }
+nav.top .live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); animation: pulse 2.4s ease-in-out infinite; box-shadow: 0 0 0 0 rgba(52,211,153,0.6); }
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.5); }
+    50% { box-shadow: 0 0 0 8px rgba(52,211,153,0); }
+}
+
+/* HERO */
+.hero { padding: 120px 0 40px; position: relative; }
+.hero::before { content: ''; position: absolute; top: -100px; right: -300px; width: 900px; height: 900px; background: radial-gradient(circle, rgba(16,185,129,0.10) 0%, rgba(52,211,153,0.04) 30%, transparent 60%); pointer-events: none; z-index: 0; filter: blur(60px); }
+.hero h1 {
+    font-family: 'Fraunces', serif;
+    font-size: clamp(40px, 6.5vw, 76px);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.035em;
+    margin-bottom: 16px;
+    background: var(--grad);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.hero p.lede {
+    font-family: 'Fraunces', serif;
+    font-weight: 500;
+    font-size: clamp(18px, 2vw, 22px);
+    color: var(--text);
+    max-width: 720px;
+    line-height: 1.5;
+    letter-spacing: -0.005em;
+}
+.hero p.lede em { color: var(--mint); font-style: italic; }
+.hero p.note { color: var(--dim); font-size: 14px; margin-top: 14px; max-width: 680px; }
+
+/* HEADLINE IP CARD */
+.headline {
+    margin: 32px 0 12px;
+    background: linear-gradient(135deg, rgba(16,185,129,0.06), rgba(110,231,183,0.03));
+    border: 1px solid rgba(16,185,129,0.22);
+    border-radius: 16px;
+    padding: 32px 36px;
+    position: relative;
+    overflow: hidden;
+}
+.headline::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: var(--grad); }
+.headline-row { display: grid; grid-template-columns: 1fr auto; gap: 32px; align-items: center; }
+.headline .label { font-family: 'Geist Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--mint); margin-bottom: 10px; }
+.headline .big { font-family: 'Fraunces', serif; font-size: clamp(48px, 7vw, 76px); font-weight: 700; letter-spacing: -0.03em; color: var(--text); line-height: 1; font-variant-numeric: tabular-nums; }
+.headline .unit { color: var(--dim); font-weight: 400; font-size: 0.55em; margin-left: 6px; letter-spacing: -0.01em; }
+.headline .compare { font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--dim); margin-top: 18px; line-height: 1.7; }
+.headline .compare .filfox { color: var(--red); }
+.headline .compare .ours { color: var(--mint); }
+.headline-decomp { display: flex; flex-direction: column; gap: 8px; min-width: 220px; }
+.headline-decomp .row { display: flex; justify-content: space-between; gap: 16px; padding: 10px 14px; background: rgba(8,9,12,0.5); border: 1px solid var(--border-soft); border-radius: 8px; font-family: 'Geist Mono', monospace; font-size: 12.5px; }
+.headline-decomp .row .k { color: var(--dim); }
+.headline-decomp .row .v { color: var(--text); font-weight: 500; }
+@media (max-width: 720px) {
+    .headline-row { grid-template-columns: 1fr; }
+}
+
+/* GRID OF STAT CARDS */
+h2.section-title {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--dim);
+    margin: 56px 0 18px;
+}
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    transition: border-color 0.2s, transform 0.15s;
+}
+.card:hover { border-color: var(--green); transform: translateY(-1px); }
+.card .lbl { font-family: 'Geist Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.13em; color: var(--dim); margin-bottom: 8px; }
+.card .val { font-family: 'Fraunces', serif; font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.card .val .sub { color: var(--dim); font-weight: 400; font-size: 14px; font-family: 'Geist Mono', monospace; margin-left: 4px; }
+.card .val.green { color: var(--mint); }
+.card .val.warn { color: var(--warn); }
+.card .delta { font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--dim); margin-top: 6px; }
+@media (max-width: 900px) { .cards { grid-template-columns: repeat(2, 1fr); } }
+
+/* RECENT BLOCKS STRIP */
+.blocks {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-top: 12px;
+}
+.blocks .title-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+.blocks .title-row .title { font-family: 'Geist Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.13em; color: var(--dim); }
+.blocks .title-row .updated { font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--dim-soft); }
+.blocks ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.blocks li {
+    display: grid; grid-template-columns: 90px 1fr auto;
+    gap: 14px; padding: 10px 12px;
+    background: var(--bg-soft);
+    border: 1px solid var(--border-soft);
+    border-radius: 6px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 13px;
+    transition: border-color 0.2s;
+}
+.blocks li:hover { border-color: var(--green); }
+.blocks li .miner { color: var(--text); font-weight: 500; }
+.blocks li .height { color: var(--mint); }
+.blocks li .when { color: var(--dim); font-size: 11.5px; align-self: center; }
+
+/* FOOTER */
+footer {
+    margin-top: 80px;
+    padding: 32px 0 48px;
+    border-top: 1px solid var(--border-soft);
+    color: var(--dim);
+    font-size: 13px;
+}
+footer .row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+footer .copy { font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--dim-soft); }
+
+/* LOADING */
+.skeleton { background: linear-gradient(90deg, var(--surface) 25%, var(--surface2) 50%, var(--surface) 75%); background-size: 200% 100%; animation: shimmer 1.6s infinite; color: transparent; border-radius: 4px; }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+
+/* ERROR BANNER */
+.error-banner { background: rgba(248,81,73,0.10); border: 1px solid rgba(248,81,73,0.4); color: #fbb; border-radius: 8px; padding: 10px 14px; margin: 12px 0; font-family: 'Geist Mono', monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<nav class="top">
+  <div class="inner">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="cx-grad-nav" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#6EE7B7"/>
+            <stop offset="100%" stop-color="#10B981"/>
+          </linearGradient>
+        </defs>
+        <g stroke="url(#cx-grad-nav)" stroke-width="4" fill="none" stroke-linecap="square">
+          <path d="M16 12 L6 12 L6 48 L16 48"/>
+          <path d="M44 12 L54 12 L54 48 L44 48"/>
+        </g>
+        <path d="M2 30 L18 30 L22 18 L26 42 L30 24 L34 36 L38 30 L58 30" stroke="#34D399" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="wm">Calix</span>
+    </div>
+    <div class="live">
+      <span class="dot"></span>
+      <span id="status-line">CALIBNET &middot; <span id="net-version">nv?</span> &middot; epoch <span id="epoch">…</span></span>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="container">
+    <h1>Calibration, but with the right numbers.</h1>
+    <p class="lede">Filecoin calibration testnet, computed on-chain. <em>Initial pledge that matches the actor.</em> Real network state, real cluster lens, no negative FIL.</p>
+    <p class="note" id="hero-note">Live data via Lotus RPC. Computed using the v17 actor formula. Refreshes every 15 seconds.</p>
+
+    <div id="error-slot"></div>
+
+    <!-- HEADLINE IP CARD -->
+    <div class="headline">
+      <div class="headline-row">
+        <div>
+          <div class="label">Initial Pledge &middot; new 32 GiB CC sector</div>
+          <div class="big mono"><span id="ip-fil">…</span><span class="unit">FIL</span></div>
+          <div class="compare">
+            <div><span class="ours">calix</span>: <span id="ip-fil-precise">…</span> FIL &middot; computed from actor v17</div>
+            <div><span class="filfox">filfox</span>: shows a negative number due to circulatingSupply=0 in their indexer</div>
+          </div>
+        </div>
+        <div class="headline-decomp">
+          <div class="row"><span class="k">Storage term</span><span class="v" id="ip-storage">…</span></div>
+          <div class="row"><span class="k">Consensus term</span><span class="v" id="ip-consensus">…</span></div>
+          <div class="row"><span class="k">Total</span><span class="v" id="ip-total">…</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- NETWORK CARDS -->
+    <h2 class="section-title">Network</h2>
+    <div class="cards">
+      <div class="card">
+        <div class="lbl">Network QAP</div>
+        <div class="val green mono" id="net-qap">…</div>
+        <div class="delta" id="net-qap-bytes">…</div>
+      </div>
+      <div class="card">
+        <div class="lbl">Raw Byte Power</div>
+        <div class="val mono" id="net-raw">…</div>
+        <div class="delta" id="net-raw-bytes">…</div>
+      </div>
+      <div class="card">
+        <div class="lbl">Baseline</div>
+        <div class="val mono" id="baseline">…</div>
+        <div class="delta">target curve power</div>
+      </div>
+      <div class="card">
+        <div class="lbl">Block Reward</div>
+        <div class="val mono" id="reward">…</div>
+        <div class="delta">per epoch</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">Pledge &amp; Miners</h2>
+    <div class="cards">
+      <div class="card">
+        <div class="lbl">Total Pledge Locked</div>
+        <div class="val mono" id="total-pledge">…</div>
+        <div class="delta">across the network</div>
+      </div>
+      <div class="card">
+        <div class="lbl">Avg IP / 32GiB</div>
+        <div class="val mono" id="avg-ip">…</div>
+        <div class="delta">historical, full network</div>
+      </div>
+      <div class="card">
+        <div class="lbl">Active Miners</div>
+        <div class="val mono" id="miners-active">…</div>
+        <div class="delta">above min power</div>
+      </div>
+      <div class="card">
+        <div class="lbl">Total Miner Actors</div>
+        <div class="val mono" id="miners-total">…</div>
+        <div class="delta">registered</div>
+      </div>
+    </div>
+
+    <!-- RECENT BLOCKS -->
+    <h2 class="section-title">Recent tipset</h2>
+    <div class="blocks">
+      <div class="title-row">
+        <span class="title">Latest blocks at head</span>
+        <span class="updated" id="blocks-updated">—</span>
+      </div>
+      <ul id="blocks-list">
+        <li><span class="height">…</span><span class="miner">…</span><span class="when">…</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div class="row">
+      <span class="copy">Calix &middot; built by <a href="https://reiers.io">reiers.io</a></span>
+      <span class="copy">v<span id="calix-ver">…</span> &middot; <a href="https://github.com/Reiers/calix">source</a></span>
+    </div>
+  </div>
+</footer>
+
+<script type="module">
+const API = (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
+  ? 'http://127.0.0.1:8765'
+  : '';   // same-origin in production (Caddy reverse-proxy)
+
+const ATTO = 10n ** 18n;
+const PiB = 1n << 50n;
+const TiB = 1n << 40n;
+const GiB = 1n << 30n;
+
+function fmtBytes(big) {
+  const v = BigInt(big);
+  if (v >= PiB) return `${(Number(v * 100n / PiB) / 100).toFixed(2)} PiB`;
+  if (v >= TiB) return `${(Number(v * 100n / TiB) / 100).toFixed(2)} TiB`;
+  if (v >= GiB) return `${(Number(v * 100n / GiB) / 100).toFixed(2)} GiB`;
+  return `${v} B`;
+}
+function fmtFIL(attoStr, decimals = 4) {
+  const n = BigInt(attoStr);
+  const sign = n < 0n ? '-' : '';
+  const abs = n < 0n ? -n : n;
+  const whole = abs / ATTO;
+  const frac = abs % ATTO;
+  const fracStr = frac.toString().padStart(18, '0').slice(0, decimals);
+  return `${sign}${whole.toLocaleString()}.${fracStr}`;
+}
+function fmtCommas(n) { return Number(n).toLocaleString(); }
+
+async function fetchJSON(path) {
+  const r = await fetch(`${API}${path}`);
+  if (!r.ok) throw new Error(`${path} ${r.status}`);
+  return r.json();
+}
+
+function showError(msg) {
+  const slot = document.getElementById('error-slot');
+  slot.innerHTML = `<div class="error-banner">api error: ${msg}</div>`;
+}
+function clearError() {
+  document.getElementById('error-slot').innerHTML = '';
+}
+
+let lastEpoch = 0;
+async function tick() {
+  try {
+    const ov = await fetchJSON('/api/v1/overview');
+    clearError();
+
+    document.getElementById('net-version').textContent = `nv${ov.networkVersion}`;
+    document.getElementById('epoch').textContent = ov.epoch.toLocaleString();
+    lastEpoch = ov.epoch;
+
+    // headline IP
+    document.getElementById('ip-fil').textContent = ov.ipPerCCSectorFIL.toFixed(2);
+    document.getElementById('ip-fil-precise').textContent = `+${fmtFIL(ov.ipPerCCSectorAtto, 4)}`;
+    document.getElementById('ip-storage').textContent = `${fmtFIL(ov.ipStorageTermAtto, 4)} FIL`;
+    document.getElementById('ip-consensus').textContent = `${fmtFIL(ov.ipConsensusTermAtto, 4)} FIL`;
+    document.getElementById('ip-total').textContent = `${fmtFIL(ov.ipPerCCSectorAtto, 4)} FIL`;
+
+    // network
+    document.getElementById('net-qap').textContent = fmtBytes(ov.networkQualityAdjPower);
+    document.getElementById('net-qap-bytes').textContent = `${BigInt(ov.networkQualityAdjPower).toLocaleString()} bytes`;
+    document.getElementById('net-raw').textContent = fmtBytes(ov.networkRawBytePower);
+    document.getElementById('net-raw-bytes').textContent = `${BigInt(ov.networkRawBytePower).toLocaleString()} bytes`;
+    document.getElementById('baseline').textContent = fmtBytes(ov.baselinePower);
+    document.getElementById('reward').textContent = `${fmtFIL(ov.blockReward, 4)} FIL`;
+
+    // pledge & miners
+    document.getElementById('total-pledge').textContent = `${fmtCommas(Math.round(Number(BigInt(ov.totalPledgeCollateral) / ATTO)))} FIL`;
+    const avgIP = (Number(BigInt(ov.totalPledgeCollateral)) / Number(BigInt(ov.networkQualityAdjPower))) * Number(GiB) * 32 / 1e18;
+    document.getElementById('avg-ip').textContent = `${avgIP.toFixed(2)} FIL`;
+    document.getElementById('miners-active').textContent = ov.minersAboveMinPower;
+    document.getElementById('miners-total').textContent = ov.minerCount.toLocaleString();
+  } catch (e) {
+    showError(e.message);
+  }
+
+  try {
+    const b = await fetchJSON('/api/v1/blocks/recent');
+    const list = document.getElementById('blocks-list');
+    list.innerHTML = '';
+    const now = Math.floor(Date.now() / 1000);
+    for (const blk of b.blocks) {
+      const li = document.createElement('li');
+      const age = now - blk.timestamp;
+      li.innerHTML = `<span class="height">${b.height.toLocaleString()}</span><span class="miner">${blk.miner}</span><span class="when">${age}s ago &middot; basefee ${fmtFIL(blk.parentBaseFee, 9)} FIL</span>`;
+      list.appendChild(li);
+    }
+    document.getElementById('blocks-updated').textContent = `updated ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    // non-fatal
+  }
+}
+
+(async () => {
+  try {
+    const ver = await fetchJSON('/api/v1/version');
+    document.getElementById('calix-ver').textContent = `${ver.calixVersion}+${ver.calixCommit}`;
+  } catch {}
+  await tick();
+  setInterval(tick, 15000);
+})();
+</script>
+</body>
+</html>

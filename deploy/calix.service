@@ -1,0 +1,24 @@
+[Unit]
+Description=Calix calibration API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=calix
+Group=calix
+WorkingDirectory=/opt/calix
+ExecStart=/opt/calix/calix-api
+Environment=CALIX_ADDR=127.0.0.1:8765
+Environment=CALIX_LOTUS_RPC=https://api.calibration.node.glif.io/rpc/v1
+Environment=CALIX_CORS=https://calix.reiers.io
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/calix
+
+[Install]
+WantedBy=multi-user.target
