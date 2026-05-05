@@ -1,17 +1,9 @@
 // Calix calibration API.
 //
-// Exposes a small JSON surface for the Calix dashboard. Reads chain data from
-// a Lotus RPC endpoint (default: glif calibration), computes initial pledge
-// using the actor v17 formula (calibration's current actors version), and
-// caches results aggressively to keep upstream load low.
-//
-// Endpoints:
-//
-//	GET /api/v1/health         -> ok
-//	GET /api/v1/overview       -> network summary + corrected IP estimator
-//	GET /api/v1/blocks/recent  -> last N tipsets
-//	GET /api/v1/pledge         -> per-32GiB CC IP, decomposed
-//	GET /api/v1/version        -> calix build info + chain network version
+// Reads chain state directly via Lotus RPC for the bits that need to be
+// trusted (initial-pledge math), and proxies a handful of filfox endpoints
+// for things that need indexing we don't run (rich list, miner-power
+// history, FEVM daily stats). Everything is cached server-side.
 package main
 
 import (
@@ -20,9 +12,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -33,9 +27,19 @@ import (
 // Build info
 // ----------------------------------------------------------------------------
 
-const calixVersion = "0.1.0"
+const calixVersion = "0.2.0"
 
-var calixCommit = "dev" // overridden via -ldflags at build time
+var calixCommit = "dev"
+
+// Calibration network constants.
+const (
+	calibGenesisUnix    int64 = 1667326380 // 2022-11-01T18:13:00Z
+	calibBlockDelaySecs int64 = 30
+	// Nv28 "Fire Horse" upgrade: epoch 3,694,534 (2026-05-07T14:00:00Z)
+	nv28UpgradeEpoch    int64 = 3694534
+	nv28UpgradeUnix     int64 = 1778162400 // 2026-05-07T14:00:00Z
+	nv28Codename              = "Fire Horse"
+)
 
 // ----------------------------------------------------------------------------
 // Config
@@ -44,17 +48,22 @@ var calixCommit = "dev" // overridden via -ldflags at build time
 type config struct {
 	addr      string
 	lotusRPC  string
+	filfoxAPI string
 	corsAllow string
+	faucetURL string
 }
 
 func loadConfig() config {
 	c := config{
 		addr:      envOr("CALIX_ADDR", ":8080"),
 		lotusRPC:  envOr("CALIX_LOTUS_RPC", "https://api.calibration.node.glif.io/rpc/v1"),
+		filfoxAPI: envOr("CALIX_FILFOX_API", "https://calibration.filfox.info/api/v1"),
 		corsAllow: envOr("CALIX_CORS", "*"),
+		faucetURL: envOr("CALIX_FAUCET_URL", "https://faucet.reiers.io"),
 	}
 	flag.StringVar(&c.addr, "addr", c.addr, "listen address")
 	flag.StringVar(&c.lotusRPC, "lotus", c.lotusRPC, "Lotus RPC endpoint")
+	flag.StringVar(&c.filfoxAPI, "filfox", c.filfoxAPI, "Filfox API base URL")
 	flag.StringVar(&c.corsAllow, "cors", c.corsAllow, "CORS allowed origin")
 	flag.Parse()
 	return c
@@ -68,7 +77,7 @@ func envOr(k, d string) string {
 }
 
 // ----------------------------------------------------------------------------
-// Lotus RPC client (only the methods Glif's gateway exposes)
+// Lotus RPC client
 // ----------------------------------------------------------------------------
 
 type lotus struct {
@@ -129,7 +138,45 @@ func (l *lotus) call(ctx context.Context, method string, params any, out any) er
 }
 
 // ----------------------------------------------------------------------------
-// Cached fetchers
+// Filfox proxy client
+// ----------------------------------------------------------------------------
+
+type filfox struct {
+	base string
+	hc   *http.Client
+}
+
+func newFilfox(base string) *filfox {
+	return &filfox{base: base, hc: &http.Client{Timeout: 15 * time.Second}}
+}
+
+func (f *filfox) get(ctx context.Context, path string, q url.Values, out any) error {
+	u := f.base + path
+	if q != nil {
+		u += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "calix/"+calixVersion)
+	resp, err := f.hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("filfox %s: %d %s", path, resp.StatusCode, string(body))
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// ----------------------------------------------------------------------------
+// Cache wrapper
 // ----------------------------------------------------------------------------
 
 type cached[T any] struct {
@@ -138,6 +185,7 @@ type cached[T any] struct {
 	exp   time.Time
 	val   T
 	fetch func(context.Context) (T, error)
+	set   bool
 }
 
 func newCached[T any](ttl time.Duration, fetch func(context.Context) (T, error)) *cached[T] {
@@ -147,14 +195,13 @@ func newCached[T any](ttl time.Duration, fetch func(context.Context) (T, error))
 func (c *cached[T]) Get(ctx context.Context) (T, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if time.Now().Before(c.exp) {
+	if c.set && time.Now().Before(c.exp) {
 		return c.val, nil
 	}
 	v, err := c.fetch(ctx)
 	if err != nil {
-		// Return last good value if we still have one, else propagate.
-		if !c.exp.IsZero() {
-			log.Printf("cache miss fetch failed, serving stale: %v", err)
+		if c.set {
+			log.Printf("cache miss fetch failed, serving stale (%v)", err)
 			return c.val, nil
 		}
 		var zero T
@@ -162,6 +209,60 @@ func (c *cached[T]) Get(ctx context.Context) (T, error) {
 	}
 	c.val = v
 	c.exp = time.Now().Add(c.ttl)
+	c.set = true
+	return v, nil
+}
+
+// keyed cache: same fetch fn taking a string param
+type kcached[T any] struct {
+	ttl   time.Duration
+	mu    sync.Mutex
+	items map[string]*kentry[T]
+	fetch func(ctx context.Context, key string) (T, error)
+}
+
+type kentry[T any] struct {
+	exp time.Time
+	val T
+	set bool
+}
+
+func newKeyed[T any](ttl time.Duration, fetch func(ctx context.Context, key string) (T, error)) *kcached[T] {
+	return &kcached[T]{ttl: ttl, items: map[string]*kentry[T]{}, fetch: fetch}
+}
+
+func (c *kcached[T]) Get(ctx context.Context, key string) (T, error) {
+	c.mu.Lock()
+	e, ok := c.items[key]
+	if !ok {
+		e = &kentry[T]{}
+		c.items[key] = e
+	}
+	c.mu.Unlock()
+
+	c.mu.Lock()
+	if e.set && time.Now().Before(e.exp) {
+		v := e.val
+		c.mu.Unlock()
+		return v, nil
+	}
+	c.mu.Unlock()
+
+	v, err := c.fetch(ctx, key)
+	if err != nil {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if e.set {
+			return e.val, nil
+		}
+		var zero T
+		return zero, err
+	}
+	c.mu.Lock()
+	e.val = v
+	e.exp = time.Now().Add(c.ttl)
+	e.set = true
+	c.mu.Unlock()
 	return v, nil
 }
 
@@ -175,8 +276,8 @@ type tipsetHead struct {
 		Slash string `json:"/"`
 	} `json:"Cids"`
 	Blocks []struct {
-		Miner     string `json:"Miner"`
-		Timestamp int64  `json:"Timestamp"`
+		Miner         string `json:"Miner"`
+		Timestamp     int64  `json:"Timestamp"`
 		ParentBaseFee string `json:"ParentBaseFee"`
 	} `json:"Blocks"`
 }
@@ -206,11 +307,11 @@ type rewardActorState struct {
 			PositionEstimate string `json:"PositionEstimate"`
 			VelocityEstimate string `json:"VelocityEstimate"`
 		} `json:"ThisEpochRewardSmoothed"`
-		Epoch                    int64  `json:"Epoch"`
-		EffectiveBaselinePower   string `json:"EffectiveBaselinePower"`
-		TotalStoragePowerReward  string `json:"TotalStoragePowerReward"`
-		CumsumBaseline           string `json:"CumsumBaseline"`
-		CumsumRealized           string `json:"CumsumRealized"`
+		Epoch                   int64  `json:"Epoch"`
+		EffectiveBaselinePower  string `json:"EffectiveBaselinePower"`
+		TotalStoragePowerReward string `json:"TotalStoragePowerReward"`
+		CumsumBaseline          string `json:"CumsumBaseline"`
+		CumsumRealized          string `json:"CumsumRealized"`
 	} `json:"State"`
 }
 
@@ -219,16 +320,21 @@ type rewardActorState struct {
 // ----------------------------------------------------------------------------
 
 type app struct {
-	cfg      config
-	rpc      *lotus
-	head     *cached[tipsetHead]
-	power    *cached[powerActorState]
-	reward   *cached[rewardActorState]
-	netver   *cached[int]
+	cfg            config
+	rpc            *lotus
+	ff             *filfox
+	head           *cached[tipsetHead]
+	power          *cached[powerActorState]
+	reward         *cached[rewardActorState]
+	netver         *cached[int]
+	topMiners      *cached[json.RawMessage]
+	richList       *cached[json.RawMessage]
+	powerHistory   *kcached[json.RawMessage]
+	fevmStats      *cached[json.RawMessage]
 }
 
 func newApp(cfg config) *app {
-	a := &app{cfg: cfg, rpc: newLotus(cfg.lotusRPC)}
+	a := &app{cfg: cfg, rpc: newLotus(cfg.lotusRPC), ff: newFilfox(cfg.filfoxAPI)}
 
 	a.head = newCached(15*time.Second, func(ctx context.Context) (tipsetHead, error) {
 		var t tipsetHead
@@ -251,6 +357,34 @@ func newApp(cfg config) *app {
 		return v, err
 	})
 
+	a.topMiners = newCached(60*time.Second, func(ctx context.Context) (json.RawMessage, error) {
+		var raw json.RawMessage
+		q := url.Values{}
+		q.Set("pageSize", "20")
+		err := a.ff.get(ctx, "/miner/list/power", q, &raw)
+		return raw, err
+	})
+	a.richList = newCached(120*time.Second, func(ctx context.Context) (json.RawMessage, error) {
+		var raw json.RawMessage
+		q := url.Values{}
+		q.Set("pageSize", "20")
+		q.Set("page", "0")
+		err := a.ff.get(ctx, "/rich-list", q, &raw)
+		return raw, err
+	})
+	a.powerHistory = newKeyed(5*time.Minute, func(ctx context.Context, dur string) (json.RawMessage, error) {
+		var raw json.RawMessage
+		q := url.Values{}
+		q.Set("duration", dur)
+		err := a.ff.get(ctx, "/stats/power", q, &raw)
+		return raw, err
+	})
+	a.fevmStats = newCached(5*time.Minute, func(ctx context.Context) (json.RawMessage, error) {
+		var raw json.RawMessage
+		err := a.ff.get(ctx, "/stats/fevm/daily-statistics", nil, &raw)
+		return raw, err
+	})
+
 	return a
 }
 
@@ -259,49 +393,33 @@ func newApp(cfg config) *app {
 // ----------------------------------------------------------------------------
 
 const (
-	epochsPerDay        = 2880
-	ipProjectionPeriod  = 20 * epochsPerDay // 57600 epochs
-	gammaFixedPointFP   = 1000
-	gammaActivationPM   = 300                              // 30% of pledge from baseline at full ramp
-	atto                = 1_000_000_000_000_000_000        // 1 FIL
+	epochsPerDay       = 2880
+	ipProjectionPeriod = 20 * epochsPerDay
+	atto               = 1_000_000_000_000_000_000
 )
 
-// q128 is 2^128 used to convert the smoothed FilterEstimate position to a real value.
 var q128 = new(big.Int).Lsh(big.NewInt(1), 128)
 
-// filterEstimate(positionStr) -> bigInt, value at current epoch (ignoring sub-epoch velocity).
 func filterEstimate(positionStr string) (*big.Int, error) {
 	pos, ok := new(big.Int).SetString(positionStr, 10)
 	if !ok {
 		return nil, fmt.Errorf("bad positionEstimate %q", positionStr)
 	}
-	v := new(big.Int).Quo(pos, q128)
-	return v, nil
+	return new(big.Int).Quo(pos, q128), nil
 }
 
-// initialPledgeForCCSector computes IP for a 32GiB CC sector.
-//
-// Returns: storage pledge term (atto), consensus pledge term (atto), nominal IP (atto),
-// circulating supply used (atto), and any error.
-//
-// We use TotalSupply - BurntFunds - Vesting as a calibration-friendly proxy for
-// circulating supply when the underlying RPC strips StateVMCirculatingSupplyInternal
-// (which is the case on most public gateways including Glif). Caller can override.
 func initialPledgeForCCSector(
-	ctx context.Context,
 	pwr powerActorState,
 	rwd rewardActorState,
 	circulatingSupply *big.Int,
 ) (storage, consensus, total *big.Int, err error) {
-	const sectorBytes = int64(32 * 1024 * 1024 * 1024) // 34,359,738,368
+	const sectorBytes = int64(32 * 1024 * 1024 * 1024)
 	sectorQAP := big.NewInt(sectorBytes)
 
-	// reward smoothed estimate
 	rwdEst, err := filterEstimate(rwd.State.ThisEpochRewardSmoothed.PositionEstimate)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("reward estimate: %w", err)
 	}
-	// network QAP smoothed estimate
 	netQAP, err := filterEstimate(pwr.State.ThisEpochQAPowerSmoothed.PositionEstimate)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("network QAP estimate: %w", err)
@@ -314,14 +432,10 @@ func initialPledgeForCCSector(
 		return nil, nil, nil, fmt.Errorf("bad baseline power %q", rwd.State.ThisEpochBaselinePower)
 	}
 
-	// Storage pledge (IPBase) = rewardEstimate * sectorQAP / netQAP * 20 days of epochs.
 	storage = new(big.Int).Mul(rwdEst, sectorQAP)
 	storage.Quo(storage, netQAP)
 	storage.Mul(storage, big.NewInt(int64(ipProjectionPeriod)))
 
-	// Consensus pledge (Additional IP).
-	// Numerator: 30% × CS × sectorQAP
-	// Denominator: max(baseline, netQAP) × 100
 	if circulatingSupply == nil {
 		circulatingSupply = big.NewInt(0)
 	}
@@ -361,7 +475,6 @@ type overviewResp struct {
 	IPStorageTermAtto     string  `json:"ipStorageTermAtto"`
 	IPConsensusTermAtto   string  `json:"ipConsensusTermAtto"`
 	GeneratedAt           int64   `json:"generatedAt"`
-	Note                  string  `json:"note,omitempty"`
 }
 
 func (a *app) handleOverview(w http.ResponseWriter, r *http.Request) {
@@ -381,27 +494,16 @@ func (a *app) handleOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "fetch reward: "+err.Error())
 		return
 	}
-	nv, err := a.netver.Get(ctx)
-	if err != nil {
-		nv = -1 // not fatal
-	}
+	nv, _ := a.netver.Get(ctx)
 
-	// We don't have a clean CS read on Glif's gateway. With CS=0 the
-	// consensus pledge term collapses to 0 (calibration has it negligible
-	// anyway because network QAP << baseline). Mark it in the response
-	// so we don't lie about it.
-	storage, consensus, total, err := initialPledgeForCCSector(ctx, pwr, rwd, big.NewInt(0))
+	storage, consensus, total, err := initialPledgeForCCSector(pwr, rwd, big.NewInt(0))
 	if err != nil {
 		writeError(w, 500, "compute IP: "+err.Error())
 		return
 	}
+	totalFIL, _ := new(big.Float).Quo(new(big.Float).SetInt(total), big.NewFloat(atto)).Float64()
 
-	totalFIL, _ := new(big.Float).Quo(
-		new(big.Float).SetInt(total),
-		big.NewFloat(atto),
-	).Float64()
-
-	resp := overviewResp{
+	writeJSON(w, 200, overviewResp{
 		Height:                head.Height,
 		Epoch:                 rwd.State.Epoch,
 		NetworkVersion:        nv,
@@ -417,9 +519,7 @@ func (a *app) handleOverview(w http.ResponseWriter, r *http.Request) {
 		IPStorageTermAtto:     storage.String(),
 		IPConsensusTermAtto:   consensus.String(),
 		GeneratedAt:           time.Now().Unix(),
-		Note:                  "Consensus pledge computed with circulatingSupply=0 (Glif RPC strips StateVMCirculatingSupplyInternal). On calibration this term is negligible because network QAP is far below baseline; storage pledge term dominates.",
-	}
-	writeJSON(w, 200, resp)
+	})
 }
 
 func (a *app) handleVersion(w http.ResponseWriter, r *http.Request) {
@@ -428,7 +528,6 @@ func (a *app) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"calixVersion":   calixVersion,
 		"calixCommit":    calixCommit,
 		"networkVersion": nv,
-		"lotusRPC":       a.cfg.lotusRPC,
 	})
 }
 
@@ -450,9 +549,88 @@ func (a *app) handleBlocksRecent(w http.ResponseWriter, r *http.Request) {
 			"parentBaseFee": b.ParentBaseFee,
 		})
 	}
+	writeJSON(w, 200, map[string]any{"height": head.Height, "blocks": blocks})
+}
+
+// /api/v1/upgrade — Nv28 Fire Horse countdown source of truth.
+func (a *app) handleUpgrade(w http.ResponseWriter, r *http.Request) {
+	head, _ := a.head.Get(r.Context())
+	now := time.Now().Unix()
+	secsLeft := nv28UpgradeUnix - now
+	epochsLeft := nv28UpgradeEpoch - head.Height
 	writeJSON(w, 200, map[string]any{
-		"height": head.Height,
-		"blocks": blocks,
+		"name":           "Fire Horse",
+		"networkVersion": 28,
+		"network":        "calibration",
+		"epoch":          nv28UpgradeEpoch,
+		"timestamp":      nv28UpgradeUnix,
+		"timestampISO":   time.Unix(nv28UpgradeUnix, 0).UTC().Format(time.RFC3339),
+		"announcement":   "https://github.com/filecoin-project/community/discussions/74#discussioncomment-16540452",
+		"currentEpoch":   head.Height,
+		"epochsLeft":     epochsLeft,
+		"secondsLeft":    secsLeft,
+		"genesisUnix":    calibGenesisUnix,
+		"epochSeconds":   calibBlockDelaySecs,
+	})
+}
+
+func (a *app) handleTopMiners(w http.ResponseWriter, r *http.Request) {
+	v, err := a.topMiners.Get(r.Context())
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, _ = w.Write(v)
+}
+
+func (a *app) handleRichList(w http.ResponseWriter, r *http.Request) {
+	v, err := a.richList.Get(r.Context())
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, _ = w.Write(v)
+}
+
+func (a *app) handlePowerHistory(w http.ResponseWriter, r *http.Request) {
+	dur := r.URL.Query().Get("duration")
+	if dur == "" {
+		dur = "24h"
+	}
+	if dur != "24h" && dur != "7d" && dur != "30d" {
+		writeError(w, 400, "duration must be 24h, 7d, or 30d")
+		return
+	}
+	v, err := a.powerHistory.Get(r.Context(), dur)
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, _ = w.Write(v)
+}
+
+func (a *app) handleFEVM(w http.ResponseWriter, r *http.Request) {
+	v, err := a.fevmStats.Get(r.Context())
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, _ = w.Write(v)
+}
+
+func (a *app) handleFaucet(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{
+		"name":        "Plumbline",
+		"url":         a.cfg.faucetURL,
+		"description": "Calibration tFIL + USDFC faucet, dispensed independently.",
 	})
 }
 
@@ -492,13 +670,19 @@ func main() {
 	mux.HandleFunc("/api/v1/version", a.handleVersion)
 	mux.HandleFunc("/api/v1/overview", a.handleOverview)
 	mux.HandleFunc("/api/v1/blocks/recent", a.handleBlocksRecent)
+	mux.HandleFunc("/api/v1/upgrade", a.handleUpgrade)
+	mux.HandleFunc("/api/v1/miners/top", a.handleTopMiners)
+	mux.HandleFunc("/api/v1/rich-list", a.handleRichList)
+	mux.HandleFunc("/api/v1/power-history", a.handlePowerHistory)
+	mux.HandleFunc("/api/v1/fevm-stats", a.handleFEVM)
+	mux.HandleFunc("/api/v1/faucet", a.handleFaucet)
 
 	srv := &http.Server{
 		Addr:              cfg.addr,
 		Handler:           cors(mux, cfg.corsAllow),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("calix api %s+%s listening on %s -> %s", calixVersion, calixCommit, cfg.addr, cfg.lotusRPC)
+	log.Printf("calix api %s+%s listening on %s -> lotus=%s, filfox=%s", calixVersion, calixCommit, cfg.addr, cfg.lotusRPC, cfg.filfoxAPI)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
