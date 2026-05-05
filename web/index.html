@@ -806,7 +806,6 @@ async function tick() {
     document.getElementById('epoch').textContent = ov.epoch.toLocaleString();
 
     document.getElementById('ip-fil').textContent = ov.ipPerCCSectorFIL.toFixed(2);
-    document.getElementById('ip-fil-precise').textContent = `+${fmtFIL(ov.ipPerCCSectorAtto, 4)}`;
     document.getElementById('ip-storage').textContent = `${fmtFIL(ov.ipStorageTermAtto, 4)} FIL`;
     document.getElementById('ip-consensus').textContent = `${fmtFIL(ov.ipConsensusTermAtto, 4)} FIL`;
     document.getElementById('ip-total').textContent = `${fmtFIL(ov.ipPerCCSectorAtto, 4)} FIL`;
