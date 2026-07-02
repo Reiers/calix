@@ -245,10 +245,6 @@ code { font-family: 'Fira Code', ui-monospace, monospace; font-size: 0.92em; col
     position: relative;
 }
 .op-card:hover { border-color: rgba(52,211,153,0.4); transform: translateY(-1px); }
-.op-card[data-addr="t0143103"] {
-    /* Primary node has a subtle accent edge so it reads as the home miner. */
-    border-left: 2px solid var(--accent);
-}
 .op-card .op-head {
     display: flex; align-items: baseline; justify-content: space-between;
     margin-bottom: 4px;
@@ -289,11 +285,6 @@ code { font-family: 'Fira Code', ui-monospace, monospace; font-size: 0.92em; col
     background: var(--bg-1);
     border: 1px solid var(--line);
     border-radius: 3px;
-}
-.op-card[data-addr="t0143103"] .op-role {
-    color: var(--accent);
-    border-color: rgba(52,211,153,0.4);
-    background: var(--accent-dim);
 }
 .op-card .op-id {
     font-size: 11px;
@@ -485,6 +476,64 @@ code { font-family: 'Fira Code', ui-monospace, monospace; font-size: 0.92em; col
 .upgrade .meta .k { color: var(--fg-soft); }
 .upgrade .meta a { color: var(--upg); }
 .upgrade .timer { display: flex; gap: 8px; }
+/* post-activation success state */
+.upgrade.is-complete .label { color: var(--ok); }
+.upgrade.is-complete .name .codename { color: var(--ok); }
+.upgrade.is-complete .meta a { color: var(--ok); }
+.upgrade.is-complete .timer { display: none; }
+
+/* ---------- POST-UPGRADE AUDIT PANEL ---------- */
+.post-upgrade { padding: 18px 24px; display: flex; flex-direction: column; gap: 0; }
+.post-upgrade .row {
+    display: grid;
+    grid-template-columns: 16px 132px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+    font-family: 'Fira Code', monospace; font-size: 12px;
+}
+.post-upgrade .row:last-child { border-bottom: none; }
+.post-upgrade .row .ico { font-family: 'Fira Sans', sans-serif; font-weight: 700; font-size: 14px; text-align: center; }
+.post-upgrade .row .key { color: var(--fg-soft); letter-spacing: 0.04em; text-transform: uppercase; font-size: 11px; }
+.post-upgrade .row .val { color: var(--fg); }
+.post-upgrade .row .val .mono { color: var(--fg); }
+.post-upgrade .row .val .k { color: var(--fg-soft); }
+.post-upgrade .row .val .root, .post-upgrade .row .val .cid {
+    display: inline-block; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+}
+.post-upgrade .row[data-status="ok"]      .ico { color: var(--ok); }
+.post-upgrade .row[data-status="watch"]   .ico { color: var(--watch); }
+.post-upgrade .row[data-status="failed"]  .ico { color: var(--bad); }
+.post-upgrade .row[data-status="pending"] .ico { color: var(--fg-soft); }
+.post-upgrade .row .age { color: var(--fg-dim); font-size: 11px; }
+.post-upgrade .toggle {
+    appearance: none; background: none; border: 1px solid var(--line); color: var(--fg-soft);
+    font-family: 'Fira Code', monospace; font-size: 11px; padding: 3px 8px; border-radius: 4px;
+    cursor: pointer; letter-spacing: 0.04em;
+}
+.post-upgrade .toggle:hover { color: var(--fg); border-color: var(--fg-soft); }
+.post-upgrade .actor-table {
+    display: none;
+    margin: 12px 0 4px 28px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--bg-1);
+    font-family: 'Fira Code', monospace; font-size: 11px;
+}
+.post-upgrade.expanded .actor-table { display: block; }
+.post-upgrade .actor-table table { width: 100%; border-collapse: collapse; }
+.post-upgrade .actor-table th, .post-upgrade .actor-table td {
+    text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--line);
+}
+.post-upgrade .actor-table th { color: var(--fg-soft); font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; font-size: 10px; }
+.post-upgrade .actor-table tr:last-child td { border-bottom: none; }
+.post-upgrade .actor-table .name { color: var(--fg); }
+.post-upgrade .actor-table .cid { color: var(--fg-dim); }
+@media (max-width: 720px) {
+    .post-upgrade .row { grid-template-columns: 16px 1fr auto; }
+    .post-upgrade .row .key { display: none; }
+    .post-upgrade .row .val .root, .post-upgrade .row .val .cid { max-width: 22ch; }
+    .post-upgrade .actor-table { margin-left: 0; }
+}
 .upgrade .timer .seg {
     text-align: center; min-width: 64px;
     padding: 8px 10px;
@@ -733,24 +782,10 @@ footer a:hover { color: var(--fg-dim); }
     <div class="ops-grid" id="ops-grid">
       <div class="op-card" data-addr="t0143103" data-status="ok">
         <div class="op-head">
-          <span class="op-title"><span class="op-light"></span><span class="op-name">Reiers</span></span>
-          <span class="op-role">primary</span>
+          <span class="op-title"><span class="op-light"></span><span class="op-name">TSE REIERSEN</span></span>
+          <span class="op-role">partner</span>
         </div>
         <div class="op-id mono">t0143103</div>
-        <div class="op-stats mono">
-          <span><span class="k">raw</span> <span class="v" data-field="raw">–</span></span>
-          <span><span class="k">qap</span> <span class="v" data-field="qap">–</span></span>
-          <span><span class="k">blocks</span> <span class="v" data-field="blocks">–</span></span>
-          <span class="op-delta" data-field="delta">–</span>
-        </div>
-        <div class="op-status mono" data-field="status">checking liveness…</div>
-      </div>
-      <div class="op-card" data-addr="t0144416" data-status="ok">
-        <div class="op-head">
-          <span class="op-title"><span class="op-light"></span><span class="op-name">Reiers</span></span>
-          <span class="op-role">backup</span>
-        </div>
-        <div class="op-id mono">t0144416</div>
         <div class="op-stats mono">
           <span><span class="k">raw</span> <span class="v" data-field="raw">–</span></span>
           <span><span class="k">qap</span> <span class="v" data-field="qap">–</span></span>
@@ -854,6 +889,39 @@ footer a:hover { color: var(--fg-dim); }
         <div class="seg"><div class="num mono" id="cd-h">––</div><div class="lbl">hrs</div></div>
         <div class="seg"><div class="num mono" id="cd-m">––</div><div class="lbl">min</div></div>
         <div class="seg"><div class="num mono" id="cd-s">––</div><div class="lbl">sec</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============= POST-UPGRADE AUDIT PANEL ============= -->
+  <div class="section">
+    <div class="lbl">Post-upgrade audit</div>
+    <div class="panel post-upgrade" id="post-upgrade">
+      <div class="row" id="row-migration" data-status="pending">
+        <div class="ico" id="mig-ico">…</div>
+        <div class="key">Migration</div>
+        <div class="val" id="mig-val"><span class="k">awaiting first audit cycle…</span></div>
+        <div class="age" id="mig-age"></div>
+      </div>
+      <div class="row" id="row-manifest" data-status="pending">
+        <div class="ico" id="act-ico">…</div>
+        <div class="key">Actor manifest</div>
+        <div class="val" id="act-val"><span class="k">awaiting first audit cycle…</span></div>
+        <div class="age"><button class="toggle" id="act-toggle" type="button">expand</button></div>
+      </div>
+      <div class="row" id="row-integrity" data-status="pending">
+        <div class="ico" id="int-ico">…</div>
+        <div class="key">State integrity</div>
+        <div class="val" id="int-val"><span class="k">awaiting first audit cycle…</span></div>
+        <div class="age" id="int-age"></div>
+      </div>
+      <div class="actor-table" id="act-table">
+        <table>
+          <thead>
+            <tr><th>Actor</th><th>Code CID</th></tr>
+          </thead>
+          <tbody id="act-tbody"><tr><td colspan="2"><span class="skeleton">loading</span></td></tr></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -1046,7 +1114,25 @@ const EPOCH_SECS = 30;
 
 function tickCountdown() {
   const now = Math.floor(Date.now() / 1000);
-  const left = Math.max(0, NV28_UNIX - now);
+  const left = NV28_UNIX - now;
+  const panel = document.getElementById('upgrade');
+  if (left <= 0) {
+    // Upgrade has activated. Flip panel into stable/complete state.
+    if (panel && !panel.classList.contains('is-complete')) {
+      panel.classList.add('is-complete');
+      const labelEl = panel.querySelector('.label');
+      if (labelEl) labelEl.textContent = 'CALIBRATION UPGRADE COMPLETE';
+      const metaEl = panel.querySelector('.meta');
+      if (metaEl) {
+        metaEl.innerHTML =
+          '<span class="k">status</span> <span class="mono">nv28 stable</span><br>' +
+          '<span class="k">activated</span> <span class="mono">2026-05-07T14:00:00Z</span> ' +
+          '<span class="k">·</span> <span class="k">at epoch</span> <span class="mono">3,694,534</span><br>' +
+          '<a href="https://github.com/filecoin-project/community/discussions/74#discussioncomment-16540452" target="_blank" rel="noopener">community announcement →</a>';
+      }
+    }
+    return;
+  }
   const d = Math.floor(left / 86400);
   const h = Math.floor((left % 86400) / 3600);
   const m = Math.floor((left % 3600) / 60);
@@ -1149,6 +1235,10 @@ async function refreshStatus() {
 async function refreshSignals() {
   try {
     const s = await fetchJSON('/api/v1/signals');
+    if (s.networkQAP && typeof s.networkQAP.value === 'number' && s.networkQAP.value > 0) {
+      _networkQapTiB = s.networkQAP.value;
+      refreshOpsFromMiners();
+    }
     setText('signals-window', `window: ${s.window} epoch${s.window === 1 ? '' : 's'}`);
 
     const cards = [
@@ -1195,6 +1285,7 @@ async function refreshTipsetStream() {
 }
 
 let _topMiners = null;
+let _networkQapTiB = null;
 function refreshOpsFromMiners() {
   if (!_topMiners) return;
   const byAddr = new Map(_topMiners.map(m => [m.address, m]));
@@ -1206,11 +1297,25 @@ function refreshOpsFromMiners() {
       if (el) el.textContent = v;
     };
     if (!m) {
-      set('raw', '–'); set('qap', '–'); set('blocks', '–'); set('delta', 'not in top miners');
+      set('raw', '–'); set('qap', '–'); set('blocks', '–'); set('share', '–'); set('delta', 'not in top miners');
       return;
     }
     set('raw', fmtBytesBig(m.rawBytePower));
     set('qap', fmtBytesBig(m.qualityAdjPower));
+    // QAP share of total network power
+    if (_networkQapTiB) {
+      const qapTiB = Number(BigInt(m.qualityAdjPower)) / Math.pow(2, 40);
+      const pct = (qapTiB / _networkQapTiB) * 100;
+      let shareEl = card.querySelector('[data-field="share"]');
+      if (!shareEl) {
+        const outer = document.createElement('span');
+        outer.innerHTML = '<span class="k">share</span> <span class="v" data-field="share">–</span>';
+        const blocksOuter = card.querySelector('[data-field="blocks"]').parentElement;
+        blocksOuter.parentElement.insertBefore(outer, blocksOuter);
+        shareEl = outer.querySelector('[data-field="share"]');
+      }
+      shareEl.textContent = pct.toFixed(1) + '%';
+    }
     set('blocks', m.blocksMined.toLocaleString());
     const dRaw = BigInt(m.rawBytePowerDelta || '0');
     const deltaEl = card.querySelector('[data-field="delta"]');
@@ -1406,6 +1511,98 @@ async function refreshVersion() {
   } catch {}
 }
 
+// ---------- post-upgrade audit ----------
+function shortCID(cid, head, tail) {
+  if (!cid || cid.length <= head + tail + 1) return cid || '';
+  return cid.slice(0, head) + '…' + cid.slice(-tail);
+}
+function setRowStatus(rowId, iconId, status) {
+  const row = document.getElementById(rowId);
+  if (row) row.dataset.status = status;
+  const ico = { ok: '✓', watch: '!', failed: '✗', pending: '…' }[status] || '…';
+  setText(iconId, ico);
+}
+function humanAge(genUnix) {
+  if (!genUnix) return '';
+  const ageS = Math.max(0, Math.floor(Date.now() / 1000 - genUnix));
+  if (ageS < 60) return `${ageS}s ago`;
+  if (ageS < 3600) return `${Math.floor(ageS/60)}m ago`;
+  return `${Math.floor(ageS/3600)}h ago`;
+}
+
+// Single audit fetch: backend RPC for these methods is gated by Glif, so
+// audit data is baked into a static JSON file refreshed off-band from a
+// privileged Lotus node. See web/data/audit.json.
+let _auditCache = null;
+async function fetchAudit() {
+  if (_auditCache) return _auditCache;
+  _auditCache = await fetchJSON('/data/audit.json?v=' + Date.now());
+  return _auditCache;
+}
+
+async function refreshActors() {
+  try {
+    const a = (await fetchAudit()).actors;
+    if (a.haveCanonical && a.match) {
+      setRowStatus('row-manifest', 'act-ico', 'ok');
+      setHTML('act-val', `<span class="k">nv${a.networkVersion} match ·</span> <span class="mono cid" title="${a.manifestCID}">${shortCID(a.manifestCID, 12, 6)}</span> <span class="k">· ${a.actors.length} actors loaded</span>`);
+    } else if (a.haveCanonical && !a.match) {
+      setRowStatus('row-manifest', 'act-ico', 'failed');
+      setHTML('act-val', `<span style="color:var(--bad)">FORK</span> <span class="k">· local</span> <span class="mono cid" title="${a.manifestCID}">${shortCID(a.manifestCID, 10, 6)}</span> <span class="k">≠ canonical</span> <span class="mono cid" title="${a.canonicalCID}">${shortCID(a.canonicalCID, 10, 6)}</span>`);
+    } else {
+      setRowStatus('row-manifest', 'act-ico', 'watch');
+      setHTML('act-val', `<span class="k">nv${a.networkVersion} · no canonical reference ·</span> <span class="mono cid" title="${a.manifestCID}">${shortCID(a.manifestCID, 12, 6)}</span>`);
+    }
+    const tbody = document.getElementById('act-tbody');
+    if (tbody) {
+      tbody.innerHTML = a.actors.map(x =>
+        `<tr><td class="name">${x.name}</td><td class="cid" title="${x.cid}">${x.cid}</td></tr>`
+      ).join('');
+    }
+  } catch (e) { console.error('actors', e); }
+}
+
+async function refreshMigration() {
+  try {
+    const m = (await fetchAudit()).migration;
+    if (m.status === 'ok') {
+      setRowStatus('row-migration', 'mig-ico', 'ok');
+      setHTML('mig-val', `<span class="k">nv${m.networkVersion} epoch ${m.epoch.toLocaleString()} ·</span> ${m.messages} <span class="k">messages, all exit 0 · root</span> <span class="mono root" title="${m.postStateRoot}">${shortCID(m.postStateRoot, 10, 6)}</span>`);
+    } else if (m.status === 'failed') {
+      setRowStatus('row-migration', 'mig-ico', 'failed');
+      setHTML('mig-val', `<span style="color:var(--bad)">${m.failures} of ${m.messages} messages failed</span> <span class="k">at epoch ${m.epoch.toLocaleString()}</span>`);
+    } else {
+      setRowStatus('row-migration', 'mig-ico', 'pending');
+      setHTML('mig-val', `<span class="k">${m.detail || 'pending'}</span>`);
+    }
+    setText('mig-age', humanAge(m.generatedAt));
+  } catch (e) { console.error('migration', e); }
+}
+
+async function refreshIntegrity() {
+  try {
+    const i = (await fetchAudit()).integrity;
+    if (i.status === 'ok') {
+      setRowStatus('row-integrity', 'int-ico', 'ok');
+      setHTML('int-val', `<span class="k">epoch ${i.epoch.toLocaleString()} ·</span> ${i.messages} <span class="k">messages, ${i.failures} errors · root</span> <span class="mono root" title="${i.postStateRoot}">${shortCID(i.postStateRoot, 10, 6)}</span>`);
+    } else if (i.status === 'degraded') {
+      setRowStatus('row-integrity', 'int-ico', 'watch');
+      setHTML('int-val', `<span style="color:var(--watch)">${i.failures} reverts</span> <span class="k">across ${i.messages} messages · epoch ${i.epoch.toLocaleString()}</span>`);
+    } else if (i.status === 'failed') {
+      setRowStatus('row-integrity', 'int-ico', 'failed');
+      setHTML('int-val', `<span style="color:var(--bad)">all ${i.messages} messages reverted</span> <span class="k">at epoch ${i.epoch.toLocaleString()}</span>`);
+    }
+    setText('int-age', humanAge(i.generatedAt));
+  } catch (e) { console.error('integrity', e); }
+}
+
+// expand/collapse actor table
+document.getElementById('act-toggle').addEventListener('click', () => {
+  const p = document.getElementById('post-upgrade');
+  p.classList.toggle('expanded');
+  document.getElementById('act-toggle').textContent = p.classList.contains('expanded') ? 'collapse' : 'expand';
+});
+
 // ---------- tools ----------
 function epochToDate(e) { return new Date((GENESIS + e * EPOCH_SECS) * 1000); }
 function dateToEpoch(d) { return Math.floor((d.getTime() / 1000 - GENESIS) / EPOCH_SECS); }
@@ -1431,7 +1628,7 @@ setInterval(tickCountdown, 1000);
 tickCountdown();
 
 (async () => {
-  await Promise.all([refreshStatus(), refreshSignals(), refreshTipsetStream(), refreshChart(), refreshLeaderboards(), refreshFEVM(), refreshVersion(), refreshOpStatus()]);
+  await Promise.all([refreshStatus(), refreshSignals(), refreshTipsetStream(), refreshChart(), refreshLeaderboards(), refreshFEVM(), refreshVersion(), refreshOpStatus(), refreshActors(), refreshMigration(), refreshIntegrity()]);
 
   setInterval(refreshStatus,        15000);
   setInterval(refreshSignals,       30000);
@@ -1440,6 +1637,9 @@ tickCountdown();
   setInterval(refreshLeaderboards, 120000);
   setInterval(refreshFEVM,         300000);
   setInterval(refreshOpStatus,      30000);
+  // Audit is static JSON refreshed off-band; one-shot at boot is enough.
+  // Re-fetch every 6h in case ops pushes a new audit during the day.
+  setInterval(() => { _auditCache = null; refreshActors(); refreshMigration(); refreshIntegrity(); }, 6*3600*1000);
 })();
 </script>
 </body>
