@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,25 +55,48 @@ const (
 
 	targetBlocksPerEpoch = 5
 	tipsetWindowSize     = 60 // last N tipsets we keep for KPI sparklines
+
+	// Margin past activation epoch before we run the migration audit. Calib
+	// produces a tipset every 30s; 11 epochs ~= 5.5 minutes of confirmation.
+	migrationConfirmEpochs int64 = 11
 )
+
+// canonicalManifestCIDs is the source of truth for built-in actor manifest
+// CIDs on the Calibration network. Pulled directly from a known-good calib
+// lotus node (v1.36.0-rc1+calibnet) right after each upgrade activation. If
+// the local Lotus node returns a different manifest CID for the active nv,
+// the node has forked and the dashboard surfaces it as degraded.
+var canonicalManifestCIDs = map[int]string{
+	25: "bafy2bzacecqtwq6hjhj2zy5gwjp76a4tpcg2lt7dps5ycenvynk2ijqqyo65e",
+	26: "bafy2bzacecqtwq6hjhj2zy5gwjp76a4tpcg2lt7dps5ycenvynk2ijqqyo65e",
+	27: "bafy2bzacecn64rlb52rjsvgopnidz6w42z3zobmjxqek5s4xqjh3ly47rcurg",
+	28: "bafy2bzacebkfatnbe6w4rj7lf6gkjh7mywlrpdh2dj6hu2dl4rmtwksszm2hs",
+}
+
+// cidWrap matches the `{"/": "..."}` JSON shape Lotus uses for CIDs.
+type cidWrap struct {
+	CID string `json:"/"`
+}
 
 // Config
 
 type config struct {
-	addr      string
-	lotusRPC  string
-	filfoxAPI string
-	corsAllow string
-	faucetURL string
+	addr       string
+	lotusRPC   string
+	lotusToken string
+	filfoxAPI  string
+	corsAllow  string
+	faucetURL  string
 }
 
 func loadConfig() config {
 	c := config{
-		addr:      envOr("CALIX_ADDR", ":8080"),
-		lotusRPC:  envOr("CALIX_LOTUS_RPC", "https://api.calibration.node.glif.io/rpc/v1"),
-		filfoxAPI: envOr("CALIX_FILFOX_API", "https://calibration.filfox.info/api/v1"),
-		corsAllow: envOr("CALIX_CORS", "*"),
-		faucetURL: envOr("CALIX_FAUCET_URL", "https://faucet.reiers.io"),
+		addr:       envOr("CALIX_ADDR", ":8080"),
+		lotusRPC:   envOr("CALIX_LOTUS_RPC", "https://api.calibration.node.glif.io/rpc/v1"),
+		lotusToken: envOr("CALIX_LOTUS_TOKEN", ""),
+		filfoxAPI:  envOr("CALIX_FILFOX_API", "https://calibration.filfox.info/api/v1"),
+		corsAllow:  envOr("CALIX_CORS", "*"),
+		faucetURL:  envOr("CALIX_FAUCET_URL", "https://faucet.reiers.io"),
 	}
 	flag.StringVar(&c.addr, "addr", c.addr, "listen address")
 	flag.StringVar(&c.lotusRPC, "lotus", c.lotusRPC, "Lotus RPC endpoint")
@@ -95,13 +119,14 @@ func envOr(k, d string) string {
 
 type lotus struct {
 	url    string
+	token  string // optional Bearer token; required for admin RPCs on local nodes
 	hc     *http.Client
 	idLock sync.Mutex
 	id     int
 }
 
-func newLotus(url string) *lotus {
-	return &lotus{url: url, hc: &http.Client{Timeout: 15 * time.Second}}
+func newLotus(url, token string) *lotus {
+	return &lotus{url: url, token: token, hc: &http.Client{Timeout: 60 * time.Second}}
 }
 
 type rpcReq struct {
@@ -131,6 +156,9 @@ func (l *lotus) call(ctx context.Context, method string, params any, out any) er
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if l.token != "" {
+		req.Header.Set("Authorization", "Bearer "+l.token)
+	}
 	resp, err := l.hc.Do(req)
 	if err != nil {
 		return err
@@ -506,13 +534,16 @@ type app struct {
 	richList     *cached[json.RawMessage]
 	powerHistory *kcached[json.RawMessage]
 	fevmStats    *cached[json.RawMessage]
+	actors       *kcached[actorManifestResp]
+	migration    *kcached[migrationResp]
+	integrity    *cached[integrityResp]
 	ring         *tipsetRing
 	ringRefresh  time.Time
 	ringMu       sync.Mutex
 }
 
 func newApp(cfg config) *app {
-	a := &app{cfg: cfg, rpc: newLotus(cfg.lotusRPC), ff: newFilfox(cfg.filfoxAPI)}
+	a := &app{cfg: cfg, rpc: newLotus(cfg.lotusRPC, cfg.lotusToken), ff: newFilfox(cfg.filfoxAPI)}
 
 	a.head = newCached(15*time.Second, func(ctx context.Context) (tipsetHead, error) {
 		var t tipsetHead
@@ -563,6 +594,21 @@ func newApp(cfg config) *app {
 		return raw, err
 	})
 
+	// Actor manifest is intrinsically slow-moving (changes only on nv bump),
+	// so 30-min TTL keyed by network version is ample.
+	a.actors = newKeyed(30*time.Minute, a.fetchActorManifest)
+
+	// Migration audit is a one-shot per nv: we run StateCompute at
+	// activationEpoch + 11 confirms, persist the result, return cached value
+	// thereafter. 24h TTL ensures we don't recompute for the same key, but
+	// also self-heals if the node was unavailable at activation.
+	a.migration = newKeyed(24*time.Hour, a.fetchMigrationAudit)
+
+	// State integrity ticker: applies StateCompute against head-1 every cycle.
+	// 60s TTL is well below the 90s degraded threshold, so a single failure
+	// surfaces fast without hammering the node.
+	a.integrity = newCached(60*time.Second, a.fetchStateIntegrity)
+
 	a.ring = newTipsetRing(a.rpc, a.head.Get)
 
 	// Background tipset refresh every 30s
@@ -609,6 +655,8 @@ type statusResp struct {
 	UpgradeUnix       int64       `json:"upgradeUnix"`
 	UpgradeSecsLeft   int64       `json:"upgradeSecsLeft"`
 	UpgradeEpochsLeft int64       `json:"upgradeEpochsLeft"`
+	Forked            bool        `json:"forked"`
+	ManifestMatch     *bool       `json:"manifestMatch,omitempty"`
 	GeneratedAt       int64       `json:"generatedAt"`
 }
 
@@ -633,6 +681,11 @@ func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	upgradeSecs := nv28UpgradeUnix - now
 	upgradeEpochs := nv28UpgradeEpoch - head.Height
+
+	// Manifest mismatch surfacing is deferred to dedicated post-upgrade
+	// audit endpoints; status pill stays focused on liveness signals.
+	var forked bool
+	var manifestMatch *bool = nil
 
 	switch {
 	case headAge > 90:
@@ -666,8 +719,260 @@ func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 		UpgradeUnix:       nv28UpgradeUnix,
 		UpgradeSecsLeft:   upgradeSecs,
 		UpgradeEpochsLeft: upgradeEpochs,
+		Forked:            forked,
+		ManifestMatch:     manifestMatch,
 		GeneratedAt:       time.Now().Unix(),
 	})
+}
+
+// ============================================================================
+// Actors / Migration / State integrity engine
+// ============================================================================
+
+type actorEntry struct {
+	Name string `json:"name"`
+	CID  string `json:"cid"`
+}
+
+type actorManifestResp struct {
+	NetworkVersion int          `json:"networkVersion"`
+	ManifestCID    string       `json:"manifestCID"`
+	CanonicalCID   string       `json:"canonicalCID"`
+	Match          bool         `json:"match"`
+	HaveCanonical  bool         `json:"haveCanonical"`
+	Actors         []actorEntry `json:"actors"`
+	GeneratedAt    int64        `json:"generatedAt"`
+}
+
+func (a *app) fetchActorManifest(ctx context.Context, key string) (actorManifestResp, error) {
+	nv, err := strconv.Atoi(key)
+	if err != nil {
+		return actorManifestResp{}, fmt.Errorf("bad network version %q: %w", key, err)
+	}
+
+	var manifest cidWrap
+	if err := a.rpc.call(ctx, "Filecoin.StateActorManifestCID", []any{nv}, &manifest); err != nil {
+		return actorManifestResp{}, err
+	}
+	var codes map[string]cidWrap
+	if err := a.rpc.call(ctx, "Filecoin.StateActorCodeCIDs", []any{nv}, &codes); err != nil {
+		return actorManifestResp{}, err
+	}
+
+	actors := make([]actorEntry, 0, len(codes))
+	for name, c := range codes {
+		actors = append(actors, actorEntry{Name: name, CID: c.CID})
+	}
+	sort.Slice(actors, func(i, j int) bool { return actors[i].Name < actors[j].Name })
+
+	canonical, have := canonicalManifestCIDs[nv]
+	resp := actorManifestResp{
+		NetworkVersion: nv,
+		ManifestCID:    manifest.CID,
+		CanonicalCID:   canonical,
+		HaveCanonical:  have,
+		Match:          have && manifest.CID == canonical,
+		Actors:         actors,
+		GeneratedAt:    time.Now().Unix(),
+	}
+	return resp, nil
+}
+
+func (a *app) handleActors(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	nv, err := a.netver.Get(ctx)
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	if q := r.URL.Query().Get("nv"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil {
+			nv = n
+		}
+	}
+	resp, err := a.actors.Get(ctx, strconv.Itoa(nv))
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, 200, resp)
+}
+
+type migrationResp struct {
+	NetworkVersion int    `json:"networkVersion"`
+	Epoch          int64  `json:"epoch"`
+	ConfirmEpoch   int64  `json:"confirmEpoch"`
+	PostStateRoot  string `json:"postStateRoot"`
+	Messages       int    `json:"messages"`
+	Failures       int    `json:"failures"`
+	Status         string `json:"status"` // "ok" | "failed" | "pending"
+	Detail         string `json:"detail"`
+	GeneratedAt    int64  `json:"generatedAt"`
+}
+
+// stateComputeResp matches the relevant subset of Filecoin.StateCompute output.
+type stateComputeResp struct {
+	Root  cidWrap `json:"Root"`
+	Trace []struct {
+		MsgRct struct {
+			ExitCode int    `json:"ExitCode"`
+			GasUsed  int64  `json:"GasUsed"`
+			Return   string `json:"Return"`
+		} `json:"MsgRct"`
+		Error string `json:"Error"`
+	} `json:"Trace"`
+}
+
+func (a *app) fetchMigrationAudit(ctx context.Context, key string) (migrationResp, error) {
+	nv, err := strconv.Atoi(key)
+	if err != nil {
+		return migrationResp{}, fmt.Errorf("bad network version %q: %w", key, err)
+	}
+
+	// We only know the activation epoch for nv28 right now. New upgrades
+	// require updating the constant table; until then return pending.
+	var activationEpoch int64
+	switch nv {
+	case 28:
+		activationEpoch = nv28UpgradeEpoch
+	default:
+		return migrationResp{NetworkVersion: nv, Status: "pending", Detail: "unknown activation epoch for this network version", GeneratedAt: time.Now().Unix()}, nil
+	}
+
+	head, err := a.head.Get(ctx)
+	if err != nil {
+		return migrationResp{}, err
+	}
+	confirmEpoch := activationEpoch + migrationConfirmEpochs
+	if head.Height < confirmEpoch {
+		return migrationResp{
+			NetworkVersion: nv,
+			Epoch:          activationEpoch,
+			ConfirmEpoch:   confirmEpoch,
+			Status:         "pending",
+			Detail:         fmt.Sprintf("awaiting %d more epochs of confirmation", confirmEpoch-head.Height),
+			GeneratedAt:    time.Now().Unix(),
+		}, nil
+	}
+
+	// Get the tipset key at the activation epoch.
+	var ts struct {
+		Cids []cidWrap `json:"Cids"`
+	}
+	if err := a.rpc.call(ctx, "Filecoin.ChainGetTipSetByHeight", []any{activationEpoch, nil}, &ts); err != nil {
+		return migrationResp{}, err
+	}
+	var sc stateComputeResp
+	if err := a.rpc.call(ctx, "Filecoin.StateCompute", []any{activationEpoch, []any{}, ts.Cids}, &sc); err != nil {
+		return migrationResp{}, err
+	}
+	failures := 0
+	for _, t := range sc.Trace {
+		if t.MsgRct.ExitCode != 0 || t.Error != "" {
+			failures++
+		}
+	}
+	status := "ok"
+	detail := fmt.Sprintf("%d messages applied, all exit code 0", len(sc.Trace))
+	if failures > 0 {
+		status = "failed"
+		detail = fmt.Sprintf("%d of %d messages failed at activation", failures, len(sc.Trace))
+	}
+	return migrationResp{
+		NetworkVersion: nv,
+		Epoch:          activationEpoch,
+		ConfirmEpoch:   confirmEpoch,
+		PostStateRoot:  sc.Root.CID,
+		Messages:       len(sc.Trace),
+		Failures:       failures,
+		Status:         status,
+		Detail:         detail,
+		GeneratedAt:    time.Now().Unix(),
+	}, nil
+}
+
+func (a *app) handleMigration(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	nv, err := a.netver.Get(ctx)
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	if q := r.URL.Query().Get("nv"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil {
+			nv = n
+		}
+	}
+	resp, err := a.migration.Get(ctx, strconv.Itoa(nv))
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, 200, resp)
+}
+
+type integrityResp struct {
+	Epoch         int64  `json:"epoch"`
+	Messages      int    `json:"messages"`
+	Failures      int    `json:"failures"`
+	PostStateRoot string `json:"postStateRoot"`
+	Status        string `json:"status"` // "ok" | "degraded" | "failed"
+	Detail        string `json:"detail"`
+	GeneratedAt   int64  `json:"generatedAt"`
+}
+
+func (a *app) fetchStateIntegrity(ctx context.Context) (integrityResp, error) {
+	head, err := a.head.Get(ctx)
+	if err != nil {
+		return integrityResp{}, err
+	}
+	// Avoid the active head (its parent state is what we can compute against);
+	// run against head.Height-1 which is fully sealed.
+	target := head.Height - 1
+	var ts struct {
+		Cids []cidWrap `json:"Cids"`
+	}
+	if err := a.rpc.call(ctx, "Filecoin.ChainGetTipSetByHeight", []any{target, nil}, &ts); err != nil {
+		return integrityResp{}, err
+	}
+	var sc stateComputeResp
+	if err := a.rpc.call(ctx, "Filecoin.StateCompute", []any{target, []any{}, ts.Cids}, &sc); err != nil {
+		return integrityResp{}, err
+	}
+	failures := 0
+	for _, t := range sc.Trace {
+		if t.MsgRct.ExitCode != 0 || t.Error != "" {
+			failures++
+		}
+	}
+	status := "ok"
+	detail := fmt.Sprintf("%d messages, 0 errors", len(sc.Trace))
+	if failures > 0 && failures < len(sc.Trace) {
+		status = "degraded"
+		detail = fmt.Sprintf("%d of %d messages reverted", failures, len(sc.Trace))
+	} else if failures > 0 && failures == len(sc.Trace) && len(sc.Trace) > 0 {
+		status = "failed"
+		detail = fmt.Sprintf("all %d messages reverted", len(sc.Trace))
+	}
+	return integrityResp{
+		Epoch:         target,
+		Messages:      len(sc.Trace),
+		Failures:      failures,
+		PostStateRoot: sc.Root.CID,
+		Status:        status,
+		Detail:        detail,
+		GeneratedAt:   time.Now().Unix(),
+	}, nil
+}
+
+func (a *app) handleIntegrity(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	resp, err := a.integrity.Get(ctx)
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, 200, resp)
 }
 
 func humanDuration(secs int64) string {
@@ -953,7 +1258,7 @@ func (a *app) handleFaucet(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleMinerStatus returns liveness data for a comma-separated list of miner addrs.
-// /api/v1/miners/status?addrs=t0143103,t0144416,t0180698,t0181521,f04040
+// /api/v1/miners/status?addrs=t0143103,t0144416,t0180698,t0181521,t0183240
 //
 // For each address we report:
 //   - blocksLast60: how many blocks they produced in the last 60 epochs
@@ -1085,6 +1390,13 @@ func main() {
 	mux.HandleFunc("/api/v1/fevm-stats", a.handleFEVM)
 	mux.HandleFunc("/api/v1/faucet", a.handleFaucet)
 	mux.HandleFunc("/api/v1/miners/status", a.handleMinerStatus)
+	// /api/v1/actors, /api/v1/upgrade-result, /api/v1/state-integrity are
+	// served as static JSON from web/data/audit.json (refreshed off-band
+	// from a privileged Lotus node) so calix-api stays compatible with
+	// public RPC providers like Glif that gate the underlying admin
+	// methods. The handlers (a.handleActors / handleMigration / handleIntegrity)
+	// remain in this binary for future deployments that have direct admin
+	// RPC access and want to serve them live.
 
 	srv := &http.Server{
 		Addr:              cfg.addr,

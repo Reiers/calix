@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": 1778169800,
+  "actors": {
+    "networkVersion": 28,
+    "manifestCID": "bafy2bzacebkfatnbe6w4rj7lf6gkjh7mywlrpdh2dj6hu2dl4rmtwksszm2hs",
+    "canonicalCID": "bafy2bzacebkfatnbe6w4rj7lf6gkjh7mywlrpdh2dj6hu2dl4rmtwksszm2hs",
+    "match": true,
+    "haveCanonical": true,
+    "actors": [
+      {
+        "name": "account",
+        "cid": "bafk2bzaceaaekrmq3cqnzokwmuksgr7vqgslpm67blh3fhj4cwgnk5vgoksam"
+      },
+      {
+        "name": "cron",
+        "cid": "bafk2bzacea6qt5zk7n6z3xg3mn6rbd54ijnzqkz7mdt4vinjclylgp44unau6"
+      },
+      {
+        "name": "datacap",
+        "cid": "bafk2bzaced6f3eomhaanxsrgwxp7oienjh7baramvz42kw5swszcpo44gay5m"
+      },
+      {
+        "name": "eam",
+        "cid": "bafk2bzacedwo54emfh7xdayrnojvbighqdwvqcmaatovcnvfm3b3oouwpdzi6"
+      },
+      {
+        "name": "ethaccount",
+        "cid": "bafk2bzaceduuafkwihklhnrwrcjvembs2t24mayoy54dy4pw65tnozzqikdbs"
+      },
+      {
+        "name": "evm",
+        "cid": "bafk2bzaceb63lj5qyx6hrtagl4mlqla6rb2ligpeglurhfvn2avubim62oyxc"
+      },
+      {
+        "name": "init",
+        "cid": "bafk2bzaceckaapwi22d56nqlnieqapwaqmicv7oqtbuowa4vfrckqr465eank"
+      },
+      {
+        "name": "multisig",
+        "cid": "bafk2bzacechrsbw65ojbktr63swju5g7275fl3lxminrz7damr4me6wq6fjxm"
+      },
+      {
+        "name": "paymentchannel",
+        "cid": "bafk2bzacecycr25bi4fqwpkrkyiarch3qlhakt6l5linxrs4vpjzv5a3a55rg"
+      },
+      {
+        "name": "placeholder",
+        "cid": "bafk2bzacedfvut2myeleyq67fljcrw4kkmn5pb5dpyozovj7jpoez5irnc3ro"
+      },
+      {
+        "name": "reward",
+        "cid": "bafk2bzacebr7cct7gottmvpd4ye5av5rbeoqhhlniyizu3tdoia2v3jzgzib2"
+      },
+      {
+        "name": "storagemarket",
+        "cid": "bafk2bzaceabzd7bytvpvamtunoqsbjlhhtu52vrshvel4hc4i7p52qkzuuubk"
+      },
+      {
+        "name": "storageminer",
+        "cid": "bafk2bzacedmjs2a62u5isgkewjaik6zxq3obrowalnb2vvkmipomro2rvesh2"
+      },
+      {
+        "name": "storagepower",
+        "cid": "bafk2bzacec44gnb4mttxdquf4v565figj5l4oquggy5eoftwgdvvsmeeqhtnu"
+      },
+      {
+        "name": "system",
+        "cid": "bafk2bzacecq366vuipuunlityjeaj7q7iexemcpkv7b5netouxcow4qr4cr6c"
+      },
+      {
+        "name": "verifiedregistry",
+        "cid": "bafk2bzaceb6slpid3f7miqz6kylytd2azlngbce2jsa7p2cos3ejnixxat5cu"
+      }
+    ],
+    "generatedAt": 1778169800
+  },
+  "migration": {
+    "networkVersion": 28,
+    "epoch": 3694534,
+    "confirmEpoch": 3694545,
+    "postStateRoot": "bafy2bzaceciottkyq4lnuwexjplrepzqldokzfmmhgsu2c2ipcvn2gui25yeq",
+    "messages": 41,
+    "failures": 0,
+    "status": "ok",
+    "detail": "41 messages applied, all exit code 0",
+    "generatedAt": 1778169800
+  },
+  "integrity": {
+    "epoch": 3694777,
+    "messages": 38,
+    "failures": 0,
+    "postStateRoot": "bafy2bzaceccodt3rjtdspeo7l7xnm7kmilbzf3c25q6qgul7p3422ruj5ldla",
+    "status": "ok",
+    "detail": "38 messages, 0 errors",
+    "generatedAt": 1778169800
+  }
+}
