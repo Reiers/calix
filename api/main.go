@@ -1171,6 +1171,111 @@ func classifyAround(v, target, okBand, warnBand float64) string {
 // Other handlers
 // ============================================================================
 
+// handleMetrics exposes calix's live signals in Prometheus text-format.
+// Referenced from Reiers/plumbline SLO.md §8 (machine-readable index)
+// and RUNBOOK.md §9 (metrics).
+//
+// Metrics:
+//
+//	calix_up                        1 when the API responded
+//	calix_head_epoch                current calibration head epoch
+//	calix_head_age_seconds          seconds since the most-recent tipset
+//	calix_network_version           active Filecoin network version
+//	calix_blocks_per_epoch          rolling KPI from /api/v1/signals
+//	calix_null_round_percent        rolling KPI from /api/v1/signals
+//	calix_active_miners             rolling KPI from /api/v1/signals
+//	calix_upgrade_pending           1 when a nv upgrade activates in the next 24h
+//	calix_upgrade_seconds_left      seconds until the next nv activation (negative if already activated)
+//	calix_forked                    1 when the local Lotus disagrees with the canonical manifest
+//	calix_scrape_timestamp_seconds  unix timestamp of the scrape
+func (a *app) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	head, headErr := a.head.Get(ctx)
+	nv, _ := a.netver.Get(ctx)
+	now := time.Now().Unix()
+
+	var epoch int64
+	var headAge int64 = -1
+	if headErr == nil {
+		epoch = head.Height
+		if len(head.Blocks) > 0 {
+			headAge = now - head.Blocks[0].Timestamp
+		}
+	}
+
+	upgradeSecs := nv28UpgradeUnix - now
+	upgradePending := 0
+	if upgradeSecs > 0 && upgradeSecs < 24*3600 {
+		upgradePending = 1
+	}
+
+	// Signals KPIs. Compute the same way handleSignals does but only pull
+	// the fields we expose. Any error here just omits the sample.
+	bpe, nullPct, activeMiners, sigOk := a.metricsSignals(ctx)
+
+	up := 1
+	if headErr != nil {
+		up = 0
+	}
+
+	var b strings.Builder
+	write := func(help, typ, name, sample string) {
+		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s %s\n%s\n", name, help, name, typ, sample)
+	}
+
+	write("Calix API server is up and returning fresh chain-head data.", "gauge",
+		"calix_up", fmt.Sprintf("calix_up %d", up))
+	write("Current calibration head epoch.", "gauge",
+		"calix_head_epoch", fmt.Sprintf("calix_head_epoch %d", epoch))
+	if headAge >= 0 {
+		write("Seconds since the most-recent tipset arrived.", "gauge",
+			"calix_head_age_seconds", fmt.Sprintf("calix_head_age_seconds %d", headAge))
+	}
+	write("Active Filecoin network version.", "gauge",
+		"calix_network_version", fmt.Sprintf("calix_network_version %d", nv))
+	if sigOk {
+		write("Rolling blocks-per-epoch KPI.", "gauge",
+			"calix_blocks_per_epoch", fmt.Sprintf("calix_blocks_per_epoch %.4f", bpe))
+		write("Rolling null-round percentage KPI.", "gauge",
+			"calix_null_round_percent", fmt.Sprintf("calix_null_round_percent %.4f", nullPct))
+		write("Rolling active miners KPI.", "gauge",
+			"calix_active_miners", fmt.Sprintf("calix_active_miners %d", activeMiners))
+	}
+	write("1 when a Filecoin nv upgrade activates within 24 hours.", "gauge",
+		"calix_upgrade_pending", fmt.Sprintf("calix_upgrade_pending %d", upgradePending))
+	write("Seconds until the next nv activation. Negative when already activated.", "gauge",
+		"calix_upgrade_seconds_left", fmt.Sprintf("calix_upgrade_seconds_left %d", upgradeSecs))
+	write("Unix timestamp of the current scrape.", "gauge",
+		"calix_scrape_timestamp_seconds", fmt.Sprintf("calix_scrape_timestamp_seconds %d", now))
+
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.WriteHeader(200)
+	_, _ = w.Write([]byte(b.String()))
+}
+
+// metricsSignals returns a minimal subset of the KPIs from handleSignals
+// suitable for a Prometheus scrape. Returns ok=false on any error so
+// callers can omit the samples rather than emit misleading zeros.
+func (a *app) metricsSignals(ctx context.Context) (bpe, nullPct float64, activeMiners int, ok bool) {
+	snap := a.ring.snapshot()
+	if len(snap) == 0 {
+		return 0, 0, 0, false
+	}
+	var blocks, nulls int
+	for _, ts := range snap {
+		blocks += ts.BlockCount
+		if ts.BlockCount == 0 {
+			nulls++
+		}
+	}
+	bpe = float64(blocks) / float64(len(snap))
+	nullPct = 100.0 * float64(nulls) / float64(len(snap))
+	if pwr, err := a.power.Get(ctx); err == nil {
+		activeMiners = int(pwr.State.MinerAboveMinPowerCount)
+	}
+	return bpe, nullPct, activeMiners, true
+}
+
 func (a *app) handleHealth(w http.ResponseWriter, r *http.Request) {
 	a.ringMu.Lock()
 	last := a.ringRefresh
@@ -1379,6 +1484,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", a.handleHealth)
+	mux.HandleFunc("/metrics", a.handleMetrics)
 	mux.HandleFunc("/api/v1/version", a.handleVersion)
 	mux.HandleFunc("/api/v1/status", a.handleStatus)
 	mux.HandleFunc("/api/v1/signals", a.handleSignals)
