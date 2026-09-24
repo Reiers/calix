@@ -41,7 +41,7 @@ import (
 	"time"
 )
 
-const calixVersion = "0.4.0"
+const calixVersion = "0.5.0"
 
 var calixCommit = "dev"
 
@@ -166,6 +166,7 @@ type config struct {
 	addr       string
 	lotusRPC   string
 	lotusToken string
+	lotusRPCv2 string
 	filfoxAPI  string
 	corsAllow  string
 	faucetURL  string
@@ -185,6 +186,9 @@ func loadConfig() config {
 	flag.StringVar(&c.filfoxAPI, "filfox", c.filfoxAPI, "Filfox API base URL")
 	flag.StringVar(&c.corsAllow, "cors", c.corsAllow, "CORS allowed origin")
 	flag.Parse()
+	// v2 API (experimental in Lotus) hosts ChainGetTipSetFinalityStatus.
+	// Default: same endpoint with /rpc/v1 swapped for /rpc/v2.
+	c.lotusRPCv2 = envOr("CALIX_LOTUS_RPC_V2", strings.Replace(c.lotusRPC, "/rpc/v1", "/rpc/v2", 1))
 	return c
 }
 
@@ -620,6 +624,7 @@ type app struct {
 	migration    *kcached[migrationResp]
 	integrity    *cached[integrityResp]
 	ring         *tipsetRing
+	fin          *finalityTracker
 	ringRefresh  time.Time
 	ringMu       sync.Mutex
 }
@@ -692,6 +697,10 @@ func newApp(cfg config) *app {
 	a.integrity = newCached(60*time.Second, a.fetchStateIntegrity)
 
 	a.ring = newTipsetRing(a.rpc, a.head.Get)
+
+	// Finality sampler: ChainGetTipSetFinalityStatus every 30s over v2.
+	a.fin = newFinalityTracker(newLotus(cfg.lotusRPCv2, cfg.lotusToken), a.rpc)
+	go a.fin.run(context.Background())
 
 	// Background tipset refresh every 30s
 	go func() {
@@ -1273,6 +1282,10 @@ func classifyAround(v, target, okBand, warnBand float64) string {
 //	calix_upgrade_seconds_left      seconds until the next nv activation (negative if already activated)
 //	calix_upgrade_network_version   network version the countdown tracks
 //	calix_upgrade_epoch             activation epoch the countdown tracks
+//	calix_finality_ec_depth         EC finality threshold depth (epochs), -1 if not met
+//	calix_finality_f3_depth         F3 finalized depth behind head, -1 if unavailable
+//	calix_finality_depth            depth of the tipset the node treats as final
+//	calix_finality_f3_available     1 when F3 returned a finalized tipset
 //	calix_forked                    1 when the local Lotus disagrees with the canonical manifest
 //	calix_scrape_timestamp_seconds  unix timestamp of the scrape
 func (a *app) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -1337,6 +1350,20 @@ func (a *app) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		"calix_upgrade_pending", fmt.Sprintf("calix_upgrade_pending %d", upgradePending))
 	write("Seconds until the next nv activation. Negative when already activated.", "gauge",
 		"calix_upgrade_seconds_left", fmt.Sprintf("calix_upgrade_seconds_left %d", upgradeSecs))
+	if f, ok := a.fin.latest(); ok {
+		f3Avail := 0
+		if f.F3Depth >= 0 {
+			f3Avail = 1
+		}
+		write("EC probabilistic finality threshold depth in epochs (2^-30). -1 when chain health is too degraded.", "gauge",
+			"calix_finality_ec_depth", fmt.Sprintf("calix_finality_ec_depth %d", f.ECDepth))
+		write("Depth of the F3-finalized tipset behind head. -1 when F3 is unavailable.", "gauge",
+			"calix_finality_f3_depth", fmt.Sprintf("calix_finality_f3_depth %d", f.F3Depth))
+		write("Depth of the tipset the node treats as finalized.", "gauge",
+			"calix_finality_depth", fmt.Sprintf("calix_finality_depth %d", f.FinalDepth))
+		write("1 when F3 returned a finalized tipset in the latest sample.", "gauge",
+			"calix_finality_f3_available", fmt.Sprintf("calix_finality_f3_available %d", f3Avail))
+	}
 	write("Network version of the upgrade the countdown tracks.", "gauge",
 		"calix_upgrade_network_version", fmt.Sprintf("calix_upgrade_network_version %d", tgt.NetworkVersion))
 	write("Activation epoch of the upgrade the countdown tracks.", "gauge",
@@ -1607,6 +1634,7 @@ func main() {
 	mux.HandleFunc("/api/v1/status", a.handleStatus)
 	mux.HandleFunc("/api/v1/signals", a.handleSignals)
 	mux.HandleFunc("/api/v1/upgrade", a.handleUpgrade)
+	mux.HandleFunc("/api/v1/finality", a.handleFinality)
 	mux.HandleFunc("/api/v1/tipsets/recent", a.handleTipsetsRecent)
 	mux.HandleFunc("/api/v1/miners/top", a.handleTopMiners)
 	mux.HandleFunc("/api/v1/rich-list", a.handleRichList)

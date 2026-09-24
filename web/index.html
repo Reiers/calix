@@ -445,6 +445,26 @@ code { font-family: 'Fira Code', ui-monospace, monospace; font-size: 0.92em; col
     vertical-align: middle;
 }
 
+/* ---------- CHAIN FINALITY ---------- */
+.finality { padding: 18px 24px; display: flex; flex-direction: column; gap: 14px; }
+.fin-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gutter); }
+@media (max-width: 1100px) { .fin-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 540px)  { .fin-grid { grid-template-columns: 1fr; } }
+.fin-tile { background: var(--bg-1); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; }
+.fin-tile .k { font-family: 'Fira Code', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-soft); }
+.fin-tile .v { font-size: 24px; font-weight: 600; color: var(--fg); margin-top: 4px; font-feature-settings: "tnum"; }
+.fin-tile .v .u { font-size: 11px; font-weight: 400; color: var(--fg-soft); margin-left: 6px; }
+.fin-tile .sub { font-size: 11px; color: var(--fg-dim); margin-top: 2px; }
+.fin-tile[data-status="ok"]    .v > span:first-child { color: var(--ok); }
+.fin-tile[data-status="watch"] .v > span:first-child { color: var(--watch); }
+.fin-tile[data-status="bad"]   .v > span:first-child { color: var(--bad); }
+.fin-chart svg { width: 100%; height: 80px; display: block; background: var(--bg-1); border: 1px solid var(--line); border-radius: 6px; }
+.fin-chart .legend { display: flex; gap: 16px; flex-wrap: wrap; font-family: 'Fira Code', monospace; font-size: 11px; color: var(--fg-soft); margin-top: 8px; align-items: center; }
+.fin-chart .legend .right { margin-left: auto; }
+.fin-chart .legend .swatch { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
+.fin-chart .legend .fin-dash { border-top: 1px dashed var(--watch); height: 0; }
+.fin-note { font-size: 12px; color: var(--fg-dim); line-height: 1.6; }
+
 /* ---------- UPGRADE PANEL ---------- */
 .upgrade {
     padding: 22px 24px;
@@ -870,6 +890,51 @@ footer a:hover { color: var(--fg-dim); }
         <span><i class="swatch" style="background: var(--ok)"></i>3 to 5 blocks (healthy)</span>
         <span><i class="swatch" style="background: var(--watch)"></i>1 to 2 blocks (degraded)</span>
         <span><i class="swatch" style="background: var(--bad)"></i>0 blocks (null round)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============= CHAIN FINALITY ============= -->
+  <!-- Filecoin.ChainGetTipSetFinalityStatus (Lotus v2). Suggested by rvagg. -->
+  <div class="section">
+    <div class="lbl">
+      Chain finality
+      <span class="right" id="fin-meta-r">EC calculator (FRC-0089) + F3</span>
+    </div>
+    <div class="panel finality" id="finality" data-level="pending">
+      <div class="fin-grid">
+        <div class="fin-tile" id="fin-ec" data-status="pending">
+          <div class="k">EC finality depth</div>
+          <div class="v mono"><span id="fin-ec-v">––</span><span class="u">epochs</span></div>
+          <div class="sub mono" id="fin-ec-sub">2^-30 reorg bound</div>
+        </div>
+        <div class="fin-tile" id="fin-f3" data-status="pending">
+          <div class="k">F3 finalized</div>
+          <div class="v mono"><span id="fin-f3-v">––</span><span class="u">behind head</span></div>
+          <div class="sub mono" id="fin-f3-sub">fast finality</div>
+        </div>
+        <div class="fin-tile" id="fin-final" data-status="pending">
+          <div class="k">Node finalized</div>
+          <div class="v mono"><span id="fin-final-v">––</span><span class="u">epochs</span></div>
+          <div class="sub mono" id="fin-final-sub">source: ––</div>
+        </div>
+        <div class="fin-tile" id="fin-win" data-status="pending">
+          <div class="k">Recent window</div>
+          <div class="v mono"><span id="fin-win-v">––</span><span class="u">F3 up</span></div>
+          <div class="sub mono" id="fin-win-sub">EC avg ––</div>
+        </div>
+      </div>
+      <div class="fin-chart">
+        <svg id="fin-spark" viewBox="0 0 1000 80" preserveAspectRatio="none"></svg>
+        <div class="legend">
+          <span><i class="swatch" style="background: var(--accent)"></i>EC depth</span>
+          <span><i class="swatch" style="background: var(--upg)"></i>F3 depth</span>
+          <span><i class="swatch fin-dash"></i>40-epoch healthy line</span>
+          <span class="right mono" id="fin-chart-r">––</span>
+        </div>
+      </div>
+      <div class="fin-note">
+        Depth at which a tipset is final. Lotus uses whichever of F3 or the EC calculator is more recent, and falls back to a static 900 epochs (7.5h) if neither is available. Healthy mainnet reaches the EC bound in 25-35 epochs; fewer blocks per tipset push it deeper, and <span class="mono">-1</span> means the bound cannot be met.
       </div>
     </div>
   </div>
@@ -1565,6 +1630,95 @@ async function refreshVersion() {
   } catch {}
 }
 
+// ---------- chain finality ----------
+function fmtEpochMins(e) {
+  const m = e * EPOCH_SECS / 60;
+  return m < 90 ? `≈ ${Math.round(m)} min` : `≈ ${(m/60).toFixed(1)} h`;
+}
+function finSpark(hist, healthy) {
+  const svg = document.getElementById('fin-spark');
+  if (!svg) return;
+  if (!hist || hist.length < 2) { svg.innerHTML = ''; return; }
+  const W = 1000, H = 80, pad = 6;
+  const vals = hist.flatMap(h => [h.ecDepth, h.f3Depth]).filter(v => v >= 0);
+  const max = Math.max(healthy * 1.5, ...vals, 1);
+  const x = i => pad + i / (hist.length - 1) * (W - 2 * pad);
+  const y = v => H - pad - (v / max) * (H - 2 * pad);
+  const line = key => {
+    let d = '', pen = false;
+    hist.forEach((h, i) => {
+      const v = h[key];
+      if (v < 0) { pen = false; return; }
+      d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)} `;
+      pen = true;
+    });
+    return d;
+  };
+  // gaps where EC threshold was not met, shaded red
+  const gaps = hist.map((h, i) => h.ecDepth < 0
+    ? `<rect x="${(x(i) - 2).toFixed(1)}" y="0" width="4" height="${H}" fill="rgba(248,113,113,0.25)"/>` : '').join('');
+  svg.innerHTML =
+    gaps +
+    `<line x1="0" x2="${W}" y1="${y(healthy).toFixed(1)}" y2="${y(healthy).toFixed(1)}" stroke="var(--watch)" stroke-dasharray="6 6" stroke-width="1" opacity="0.6" vector-effect="non-scaling-stroke"/>` +
+    `<path d="${line('f3Depth')}" fill="none" stroke="var(--upg)" stroke-width="1.4" vector-effect="non-scaling-stroke"/>` +
+    `<path d="${line('ecDepth')}" fill="none" stroke="var(--accent)" stroke-width="1.8" vector-effect="non-scaling-stroke"/>`;
+  const first = hist[0], last = hist[hist.length - 1];
+  setText('fin-chart-r', `epochs ${first.head.toLocaleString('en-US')} → ${last.head.toLocaleString('en-US')} · max ${Math.round(max)}`);
+}
+function setTile(id, status) {
+  const el = document.getElementById(id);
+  if (el) el.dataset.status = status;
+}
+async function refreshFinality() {
+  try {
+    const f = await fetchJSON('/api/v1/finality');
+    const panel = document.getElementById('finality');
+    if (!f.available) {
+      panel.dataset.level = 'unavailable';
+      ['fin-ec', 'fin-f3', 'fin-final', 'fin-win'].forEach(t => setTile(t, 'pending'));
+      setText('fin-ec-v', '––'); setText('fin-f3-v', '––'); setText('fin-final-v', '––'); setText('fin-win-v', '––');
+      setText('fin-ec-sub', 'finality status unavailable from RPC');
+      setText('fin-meta-r', 'unavailable');
+      return;
+    }
+    panel.dataset.level = f.level;
+    // EC
+    setTile('fin-ec', f.ecLevel);
+    if (f.ecDepth >= 0) {
+      setText('fin-ec-v', f.ecDepth);
+      setText('fin-ec-sub', `${fmtEpochMins(f.ecDepth)} · healthy ≤ ${f.ecHealthyMaxDepth}`);
+    } else {
+      setText('fin-ec-v', '-1');
+      setText('fin-ec-sub', 'bound not met, chain too degraded');
+    }
+    // F3
+    if (f.f3Depth >= 0) {
+      setTile('fin-f3', 'ok');
+      setText('fin-f3-v', f.f3Depth);
+      setText('fin-f3-sub', `${fmtEpochMins(f.f3Depth)} · certificate`);
+    } else {
+      setTile('fin-f3', 'watch');
+      setText('fin-f3-v', '––');
+      setText('fin-f3-sub', 'no F3 finalized tipset');
+    }
+    // Node finalized
+    const srcLabel = { f3: 'F3', ec: 'EC calculator', static: 'static 900 fallback' }[f.source] || f.source;
+    setTile('fin-final', f.source === 'static' ? 'bad' : (f.finalDepth > f.ecHealthyMaxDepth ? 'watch' : 'ok'));
+    setText('fin-final-v', f.finalDepth);
+    setText('fin-final-sub', `source: ${srcLabel} · vs ${f.staticDepth} static`);
+    // Window
+    const w = f.window;
+    const f3pct = Math.round(w.f3AvailablePct);
+    setTile('fin-win', f3pct >= 90 ? 'ok' : f3pct >= 50 ? 'watch' : 'bad');
+    setText('fin-win-v', `${f3pct}%`);
+    setText('fin-win-sub', w.ecMin >= 0
+      ? `EC avg ${w.ecAvg.toFixed(0)} · range ${w.ecMin}–${w.ecMax} · ${w.samples} samples`
+      : `EC bound unmet in window · ${w.samples} samples`);
+    setText('fin-meta-r', `head ${f.head.toLocaleString('en-US')} · ${f.level.toUpperCase()}`);
+    finSpark(f.history, f.ecHealthyMaxDepth);
+  } catch (e) { console.error('finality', e); }
+}
+
 // ---------- post-upgrade audit ----------
 function shortCID(cid, head, tail) {
   if (!cid || cid.length <= head + tail + 1) return cid || '';
@@ -1682,7 +1836,7 @@ setInterval(tickCountdown, 1000);
 tickCountdown();
 
 (async () => {
-  await Promise.all([refreshStatus(), refreshSignals(), refreshTipsetStream(), refreshChart(), refreshLeaderboards(), refreshFEVM(), refreshVersion(), refreshOpStatus(), refreshActors(), refreshMigration(), refreshIntegrity()]);
+  await Promise.all([refreshStatus(), refreshSignals(), refreshTipsetStream(), refreshChart(), refreshLeaderboards(), refreshFEVM(), refreshVersion(), refreshOpStatus(), refreshActors(), refreshMigration(), refreshIntegrity(), refreshFinality()]);
 
   setInterval(refreshStatus,        15000);
   setInterval(refreshSignals,       30000);
@@ -1691,6 +1845,7 @@ tickCountdown();
   setInterval(refreshLeaderboards, 120000);
   setInterval(refreshFEVM,         300000);
   setInterval(refreshOpStatus,      30000);
+  setInterval(refreshFinality,      30000);
   // Audit is static JSON refreshed off-band; one-shot at boot is enough.
   // Re-fetch every 6h in case ops pushes a new audit during the day.
   setInterval(() => { _auditCache = null; refreshActors(); refreshMigration(); refreshIntegrity(); }, 6*3600*1000);

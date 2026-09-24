@@ -135,3 +135,7 @@ Configurable via env: `CALIX_ADDR`, `CALIX_LOTUS_RPC`, `CALIX_FILFOX_API`,
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+### Chain finality
+
+Samples `Filecoin.ChainGetTipSetFinalityStatus` (Lotus v2 API, `CALIX_LOTUS_RPC_V2`, defaults to the v1 URL with `/rpc/v2`) every 30s. Shows the EC probabilistic finality depth (FRC-0089, 2^-30 reorg bound; -1 = bound not met), the F3 finalized depth, the depth the node actually treats as final and which mechanism sets it, plus a 2h history. When the status call returns no F3 tipset, Calix retries `Filecoin.F3GetLatestCertificate` over v1, because Glif's load-balanced backends intermittently fail to reach F3 and would otherwise report false F3 outages. Served at `/api/v1/finality`; exported as `calix_finality_*` in `/metrics`. Suggested by rvagg.
