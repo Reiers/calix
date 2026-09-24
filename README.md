@@ -50,7 +50,7 @@ Sixty vertical bars covering the last 30 minutes of chain history.
 Hover any bar for `epoch · block count · timestamp`.
 
 ### Upgrade readiness
-Live countdown to the next network upgrade — currently **nv28 Fire Horse**, epoch 3,694,534, 2026-05-07T14:00:00Z. Days, hours, minutes, seconds. Direct link to the community announcement.
+Two cards: the current network version (nv28 Fire Horse, activated epoch 3,694,534) and a live countdown to the next upgrade: **nv29 Solstice**, epoch 4,109,133, 2026-09-28T12:59:30Z (window 12:59-13:59 UTC). Driven by one schedule table (`calibUpgrades` in `api/main.go`, `UPGRADES` in `web/index.html`) that flips automatically at activation. `/api/v1/upgrade` returns `current`, `next` and the full `upgrades` list.
 
 ### Network power chart
 Twenty-four-hour QAP trend, drawn as a native SVG line + area. Redraws on window resize so the geometry stays in real pixels.

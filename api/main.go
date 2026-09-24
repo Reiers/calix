@@ -41,7 +41,7 @@ import (
 	"time"
 )
 
-const calixVersion = "0.3.0"
+const calixVersion = "0.4.0"
 
 var calixCommit = "dev"
 
@@ -49,9 +49,6 @@ var calixCommit = "dev"
 const (
 	calibGenesisUnix    int64 = 1667326380
 	calibBlockDelaySecs int64 = 30
-	nv28UpgradeEpoch    int64 = 3694534
-	nv28UpgradeUnix     int64 = 1778162400
-	nv28Codename              = "Fire Horse"
 
 	targetBlocksPerEpoch = 5
 	tipsetWindowSize     = 60 // last N tipsets we keep for KPI sparklines
@@ -60,6 +57,88 @@ const (
 	// produces a tipset every 30s; 11 epochs ~= 5.5 minutes of confirmation.
 	migrationConfirmEpochs int64 = 11
 )
+
+// calibUpgrade is one scheduled or activated network upgrade on Calibration.
+//
+// Epochs come from the Lotus calibnet build params
+// (build/buildconstants/params_calibnet.go), NOT from the community
+// announcement text. When the two disagree, the implementations are what
+// actually fork the chain.
+type calibUpgrade struct {
+	NetworkVersion int
+	Name           string
+	Epoch          int64
+	Announcement   string
+	Window         string // human-readable upgrade window, optional
+}
+
+func (u calibUpgrade) Unix() int64 { return calibGenesisUnix + u.Epoch*calibBlockDelaySecs }
+
+// calibUpgrades is ordered by epoch. Add the next upgrade here (and in
+// web/index.html UPGRADES, scripts/refresh-audit.sh) when it is announced.
+var calibUpgrades = []calibUpgrade{
+	{28, "Fire Horse", 3694534, "https://github.com/filecoin-project/community/discussions/74#discussioncomment-16540452", ""},
+	// nv29 Solstice (FIP-0118). The announcement text says epoch 4097613, but
+	// that epoch maps to 2026-09-24 12:59:30 UTC. The announced date
+	// (2026-09-28 12:59:30 UTC), Lotus v1.37.0-rc1 and Forest v0.37.0 all use
+	// 4109133, so that is what the chain will actually do.
+	{29, "Solstice", 4109133, "https://github.com/filecoin-project/community/discussions/74#discussioncomment-18565956", "2026-09-28 12:59-13:59 UTC"},
+}
+
+// estimateHeight derives the expected chain height from wall-clock time.
+// Only used as a fallback when the head is unavailable.
+func estimateHeight(now int64) int64 { return (now - calibGenesisUnix) / calibBlockDelaySecs }
+
+// upgradeState splits the table at height: cur is the latest activated
+// upgrade (nil if none), next is the first pending one (nil if none).
+func upgradeState(height int64) (cur, next *calibUpgrade) {
+	for i := range calibUpgrades {
+		u := &calibUpgrades[i]
+		if height >= u.Epoch {
+			cur = u
+		} else if next == nil {
+			next = u
+		}
+	}
+	return cur, next
+}
+
+// countdownTarget is the upgrade the countdown/status tracks: the next
+// pending upgrade, or the most recently activated one when nothing is queued.
+func countdownTarget(height int64) calibUpgrade {
+	cur, next := upgradeState(height)
+	if next != nil {
+		return *next
+	}
+	if cur != nil {
+		return *cur
+	}
+	return calibUpgrades[len(calibUpgrades)-1]
+}
+
+func upgradeByNV(nv int) (calibUpgrade, bool) {
+	for _, u := range calibUpgrades {
+		if u.NetworkVersion == nv {
+			return u, true
+		}
+	}
+	return calibUpgrade{}, false
+}
+
+func upgradeJSON(u *calibUpgrade) map[string]any {
+	if u == nil {
+		return nil
+	}
+	return map[string]any{
+		"name":           u.Name,
+		"networkVersion": u.NetworkVersion,
+		"epoch":          u.Epoch,
+		"timestamp":      u.Unix(),
+		"timestampISO":   time.Unix(u.Unix(), 0).UTC().Format(time.RFC3339),
+		"announcement":   u.Announcement,
+		"window":         u.Window,
+	}
+}
 
 // canonicalManifestCIDs is the source of truth for built-in actor manifest
 // CIDs on the Calibration network. Pulled directly from a known-good calib
@@ -71,6 +150,9 @@ var canonicalManifestCIDs = map[int]string{
 	26: "bafy2bzacecqtwq6hjhj2zy5gwjp76a4tpcg2lt7dps5ycenvynk2ijqqyo65e",
 	27: "bafy2bzacecn64rlb52rjsvgopnidz6w42z3zobmjxqek5s4xqjh3ly47rcurg",
 	28: "bafy2bzacebkfatnbe6w4rj7lf6gkjh7mywlrpdh2dj6hu2dl4rmtwksszm2hs",
+	// nv29 (actors v19.0.1) from the Lotus v1.37.0-rc1 / Forest v0.37.0
+	// bundle table. Re-confirm against a live node after activation.
+	29: "bafy2bzaceastk5qjmpnaqeeq6whogrlcymyurzyq6jawkntdzwedaznw7amvy",
 }
 
 // cidWrap matches the `{"/": "..."}` JSON shape Lotus uses for CIDs.
@@ -309,7 +391,7 @@ func (c *kcached[T]) Get(ctx context.Context, key string) (T, error) {
 // ============================================================================
 
 type tipsetHead struct {
-	Height int64    `json:"Height"`
+	Height int64               `json:"Height"`
 	Cids   []map[string]string `json:"Cids"`
 	Blocks []struct {
 		Miner         string `json:"Miner"`
@@ -679,8 +761,10 @@ func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 	headline := "All systems operational"
 	detail := fmt.Sprintf("Calibration nv%d producing blocks normally", nv)
 
-	upgradeSecs := nv28UpgradeUnix - now
-	upgradeEpochs := nv28UpgradeEpoch - head.Height
+	up := countdownTarget(head.Height)
+	cur, _ := upgradeState(head.Height)
+	upgradeSecs := up.Unix() - now
+	upgradeEpochs := up.Epoch - head.Height
 
 	// Manifest mismatch surfacing is deferred to dedicated post-upgrade
 	// audit endpoints; status pill stays focused on liveness signals.
@@ -696,14 +780,18 @@ func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 		level = statusWatch
 		headline = "Tipset cadence slowing"
 		detail = fmt.Sprintf("Last tipset arrived %d seconds ago (target 30 seconds).", headAge)
+	case cur != nil && nv > 0 && nv < cur.NetworkVersion && head.Height >= cur.Epoch+migrationConfirmEpochs:
+		level = statusWatch
+		headline = fmt.Sprintf("%s activated but RPC still reports nv%d", cur.Name, nv)
+		detail = fmt.Sprintf("Network version %d was due at epoch %d. The upstream node may not have upgraded.", cur.NetworkVersion, cur.Epoch)
 	case upgradeSecs > 0 && upgradeSecs < 24*3600:
 		level = statusUpgrade
-		headline = fmt.Sprintf("%s upgrade in <24h", nv28Codename)
-		detail = fmt.Sprintf("Network version %d activates at epoch %d, in %s.", 28, nv28UpgradeEpoch, humanDuration(upgradeSecs))
+		headline = fmt.Sprintf("%s upgrade in <24h", up.Name)
+		detail = fmt.Sprintf("Network version %d activates at epoch %d, in %s.", up.NetworkVersion, up.Epoch, humanDuration(upgradeSecs))
 	case upgradeSecs > 0 && upgradeSecs < 72*3600:
 		level = statusUpgrade
-		headline = fmt.Sprintf("%s upgrade approaching", nv28Codename)
-		detail = fmt.Sprintf("Network version %d activates in %s.", 28, humanDuration(upgradeSecs))
+		headline = fmt.Sprintf("%s upgrade approaching", up.Name)
+		detail = fmt.Sprintf("Network version %d activates in %s.", up.NetworkVersion, humanDuration(upgradeSecs))
 	}
 
 	writeJSON(w, 200, statusResp{
@@ -714,9 +802,9 @@ func (a *app) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Height:            head.Height,
 		NetworkVersion:    nv,
 		HeadAgeSeconds:    headAge,
-		UpgradeName:       nv28Codename,
-		UpgradeEpoch:      nv28UpgradeEpoch,
-		UpgradeUnix:       nv28UpgradeUnix,
+		UpgradeName:       up.Name,
+		UpgradeEpoch:      up.Epoch,
+		UpgradeUnix:       up.Unix(),
 		UpgradeSecsLeft:   upgradeSecs,
 		UpgradeEpochsLeft: upgradeEpochs,
 		Forked:            forked,
@@ -829,15 +917,12 @@ func (a *app) fetchMigrationAudit(ctx context.Context, key string) (migrationRes
 		return migrationResp{}, fmt.Errorf("bad network version %q: %w", key, err)
 	}
 
-	// We only know the activation epoch for nv28 right now. New upgrades
-	// require updating the constant table; until then return pending.
-	var activationEpoch int64
-	switch nv {
-	case 28:
-		activationEpoch = nv28UpgradeEpoch
-	default:
+	// Activation epochs come from calibUpgrades; unknown nv returns pending.
+	upg, ok := upgradeByNV(nv)
+	if !ok {
 		return migrationResp{NetworkVersion: nv, Status: "pending", Detail: "unknown activation epoch for this network version", GeneratedAt: time.Now().Unix()}, nil
 	}
+	activationEpoch := upg.Epoch
 
 	head, err := a.head.Get(ctx)
 	if err != nil {
@@ -995,18 +1080,18 @@ func humanDuration(secs int64) string {
 // ============================================================================
 
 type signalsResp struct {
-	GeneratedAt   int64                `json:"generatedAt"`
-	Epoch         int64                `json:"epoch"`
-	Window        int                  `json:"window"`
-	BlocksPerEp   signalNum            `json:"blocksPerEpoch"`
-	NullRoundPct  signalNum            `json:"nullRoundPercent"`
-	BaseFee       signalNum            `json:"baseFee"`
-	WinCountAvg   signalNum            `json:"winCountAvg"`
-	NetworkQAP    signalNum            `json:"networkQAP"`
-	ActiveMiners  signalNum            `json:"activeMiners"`
-	TotalPledge   signalNum            `json:"totalPledge"`
-	IPPerSector   signalNum            `json:"ipPerSector32GiB"`
-	Series        map[string][]float64 `json:"series"`
+	GeneratedAt  int64                `json:"generatedAt"`
+	Epoch        int64                `json:"epoch"`
+	Window       int                  `json:"window"`
+	BlocksPerEp  signalNum            `json:"blocksPerEpoch"`
+	NullRoundPct signalNum            `json:"nullRoundPercent"`
+	BaseFee      signalNum            `json:"baseFee"`
+	WinCountAvg  signalNum            `json:"winCountAvg"`
+	NetworkQAP   signalNum            `json:"networkQAP"`
+	ActiveMiners signalNum            `json:"activeMiners"`
+	TotalPledge  signalNum            `json:"totalPledge"`
+	IPPerSector  signalNum            `json:"ipPerSector32GiB"`
+	Series       map[string][]float64 `json:"series"`
 }
 
 type signalNum struct {
@@ -1186,6 +1271,8 @@ func classifyAround(v, target, okBand, warnBand float64) string {
 //	calix_active_miners             rolling KPI from /api/v1/signals
 //	calix_upgrade_pending           1 when a nv upgrade activates in the next 24h
 //	calix_upgrade_seconds_left      seconds until the next nv activation (negative if already activated)
+//	calix_upgrade_network_version   network version the countdown tracks
+//	calix_upgrade_epoch             activation epoch the countdown tracks
 //	calix_forked                    1 when the local Lotus disagrees with the canonical manifest
 //	calix_scrape_timestamp_seconds  unix timestamp of the scrape
 func (a *app) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -1203,7 +1290,12 @@ func (a *app) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	upgradeSecs := nv28UpgradeUnix - now
+	height := epoch
+	if headErr != nil {
+		height = estimateHeight(now)
+	}
+	tgt := countdownTarget(height)
+	upgradeSecs := tgt.Unix() - now
 	upgradePending := 0
 	if upgradeSecs > 0 && upgradeSecs < 24*3600 {
 		upgradePending = 1
@@ -1245,6 +1337,10 @@ func (a *app) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		"calix_upgrade_pending", fmt.Sprintf("calix_upgrade_pending %d", upgradePending))
 	write("Seconds until the next nv activation. Negative when already activated.", "gauge",
 		"calix_upgrade_seconds_left", fmt.Sprintf("calix_upgrade_seconds_left %d", upgradeSecs))
+	write("Network version of the upgrade the countdown tracks.", "gauge",
+		"calix_upgrade_network_version", fmt.Sprintf("calix_upgrade_network_version %d", tgt.NetworkVersion))
+	write("Activation epoch of the upgrade the countdown tracks.", "gauge",
+		"calix_upgrade_epoch", fmt.Sprintf("calix_upgrade_epoch %d", tgt.Epoch))
 	write("Unix timestamp of the current scrape.", "gauge",
 		"calix_scrape_timestamp_seconds", fmt.Sprintf("calix_scrape_timestamp_seconds %d", now))
 
@@ -1298,21 +1394,42 @@ func (a *app) handleVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) handleUpgrade(w http.ResponseWriter, r *http.Request) {
-	head, _ := a.head.Get(r.Context())
 	now := time.Now().Unix()
+	head, err := a.head.Get(r.Context())
+	height := head.Height
+	if err != nil {
+		height = estimateHeight(now)
+	}
+	up := countdownTarget(height)
+	cur, next := upgradeState(height)
+	status := "scheduled"
+	if next == nil {
+		status = "activated"
+	}
+	all := make([]map[string]any, 0, len(calibUpgrades))
+	for i := range calibUpgrades {
+		all = append(all, upgradeJSON(&calibUpgrades[i]))
+	}
+	// Top-level fields describe the upgrade the countdown tracks (kept for
+	// backwards compatibility); current/next/upgrades give the full picture.
 	writeJSON(w, 200, map[string]any{
-		"name":           "Fire Horse",
-		"networkVersion": 28,
+		"name":           up.Name,
+		"networkVersion": up.NetworkVersion,
 		"network":        "calibration",
-		"epoch":          nv28UpgradeEpoch,
-		"timestamp":      nv28UpgradeUnix,
-		"timestampISO":   time.Unix(nv28UpgradeUnix, 0).UTC().Format(time.RFC3339),
-		"announcement":   "https://github.com/filecoin-project/community/discussions/74#discussioncomment-16540452",
-		"currentEpoch":   head.Height,
-		"epochsLeft":     nv28UpgradeEpoch - head.Height,
-		"secondsLeft":    nv28UpgradeUnix - now,
+		"status":         status,
+		"epoch":          up.Epoch,
+		"timestamp":      up.Unix(),
+		"timestampISO":   time.Unix(up.Unix(), 0).UTC().Format(time.RFC3339),
+		"announcement":   up.Announcement,
+		"window":         up.Window,
+		"currentEpoch":   height,
+		"epochsLeft":     up.Epoch - height,
+		"secondsLeft":    up.Unix() - now,
 		"genesisUnix":    calibGenesisUnix,
 		"epochSeconds":   calibBlockDelaySecs,
+		"current":        upgradeJSON(cur),
+		"next":           upgradeJSON(next),
+		"upgrades":       all,
 	})
 }
 
@@ -1372,9 +1489,10 @@ func (a *app) handleFaucet(w http.ResponseWriter, r *http.Request) {
 //   - status: ok | quiet | down
 //
 // Thresholds:
-//   ok    = produced >=1 block in the last 60 epochs (~30 min)
-//   quiet = no blocks in 60 epochs but otherwise reachable
-//   down  = quiet AND we have no recent record (treated same as quiet for now)
+//
+//	ok    = produced >=1 block in the last 60 epochs (~30 min)
+//	quiet = no blocks in 60 epochs but otherwise reachable
+//	down  = quiet AND we have no recent record (treated same as quiet for now)
 func (a *app) handleMinerStatus(w http.ResponseWriter, r *http.Request) {
 	addrsQ := r.URL.Query().Get("addrs")
 	if addrsQ == "" {
@@ -1436,10 +1554,10 @@ func (a *app) handleMinerStatus(w http.ResponseWriter, r *http.Request) {
 		out = append(out, item)
 	}
 	writeJSON(w, 200, map[string]any{
-		"window":      window,
-		"epoch":       nowEpoch,
-		"updatedAt":   nowTs,
-		"miners":      out,
+		"window":    window,
+		"epoch":     nowEpoch,
+		"updatedAt": nowTs,
+		"miners":    out,
 	})
 }
 

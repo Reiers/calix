@@ -10,7 +10,7 @@
 #
 # Usage:  ./scripts/refresh-audit.sh [<network-version>]
 #
-# Defaults to nv28 (Fire Horse). When a new upgrade ships, update both the
+# Defaults to nv28 (Fire Horse). nv29 (Solstice) activates at 4109133. When a new upgrade ships, update both the
 # canonical manifest CID inside this script and the table in
 # .vault/calix-canonical-manifests.md.
 
@@ -24,6 +24,7 @@ WORK="/tmp/calix-audit"
 # nv → activation epoch.
 case "$NV" in
   28) ACTIVATION_EPOCH=3694534 ;;
+  29) ACTIVATION_EPOCH=4109133 ;;  # Lotus v1.37.0-rc1 / Forest v0.37.0 (announcement text typo: 4097613)
   *)  echo "ERR: unknown nv$NV activation epoch (update this script)" >&2; exit 1 ;;
 esac
 
@@ -33,6 +34,7 @@ case "$NV" in
   25|26) CANONICAL=bafy2bzacecqtwq6hjhj2zy5gwjp76a4tpcg2lt7dps5ycenvynk2ijqqyo65e ;;
   27)    CANONICAL=bafy2bzacecn64rlb52rjsvgopnidz6w42z3zobmjxqek5s4xqjh3ly47rcurg ;;
   28)    CANONICAL=bafy2bzacebkfatnbe6w4rj7lf6gkjh7mywlrpdh2dj6hu2dl4rmtwksszm2hs ;;
+  29)    CANONICAL=bafy2bzaceastk5qjmpnaqeeq6whogrlcymyurzyq6jawkntdzwedaznw7amvy ;;  # actors v19.0.1, re-confirm post-activation
   *)     echo "ERR: unknown nv$NV canonical manifest (update this script)" >&2; exit 1 ;;
 esac
 

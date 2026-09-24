@@ -480,6 +480,10 @@ code { font-family: 'Fira Code', ui-monospace, monospace; font-size: 0.92em; col
 .upgrade.is-complete .name .codename { color: var(--ok); }
 .upgrade.is-complete .meta a { color: var(--ok); }
 .upgrade.is-complete .timer { display: none; }
+.upgrade-stack { display: flex; flex-direction: column; gap: 12px; }
+.upgrade.is-current { padding: 16px 24px; }
+.upgrade.is-current .name { font-size: clamp(16px, 2vw, 20px); margin-bottom: 4px; }
+.upgrade.is-hidden { display: none; }
 
 /* ---------- POST-UPGRADE AUDIT PANEL ---------- */
 .post-upgrade { padding: 18px 24px; display: flex; flex-direction: column; gap: 0; }
@@ -871,23 +875,38 @@ footer a:hover { color: var(--fg-dim); }
   </div>
 
   <!-- ============= UPGRADE PANEL ============= -->
+  <!-- Rendered from UPGRADES in the script block; static text is the no-JS fallback. -->
   <div class="section">
     <div class="lbl">Upgrade readiness</div>
-    <div class="panel upgrade" id="upgrade">
-      <div>
-        <div class="label">CALIBRATION UPGRADE INCOMING</div>
-        <div class="name">Network version 28 <span class="codename" id="up-codename">Fire Horse</span></div>
-        <div class="meta">
-          <span class="k">activates</span> <span class="mono" id="up-when">2026-05-07T14:00:00Z</span><br>
-          <span class="k">at epoch</span> <span class="mono" id="up-epoch">3,694,534</span> <span class="k">·</span> <span class="k">in</span> <span class="mono" id="up-eta">––</span><br>
-          <a href="https://github.com/filecoin-project/community/discussions/74#discussioncomment-16540452" target="_blank" rel="noopener">community announcement →</a>
+    <div class="upgrade-stack">
+      <div class="panel upgrade is-complete is-current" id="upgrade-current">
+        <div>
+          <div class="label">CALIBRATION UPGRADE COMPLETE</div>
+          <div class="name">Network version <span id="cur-nv">28</span> <span class="codename" id="cur-codename">Fire Horse</span></div>
+          <div class="meta" id="cur-meta">
+            <span class="k">status</span> <span class="mono">nv28 stable</span><br>
+            <span class="k">activated</span> <span class="mono">2026-05-07T14:00:00Z</span> <span class="k">·</span> <span class="k">at epoch</span> <span class="mono">3,694,534</span><br>
+            <a href="https://github.com/filecoin-project/community/discussions/74#discussioncomment-16540452" target="_blank" rel="noopener">community announcement →</a>
+          </div>
         </div>
       </div>
-      <div class="timer">
-        <div class="seg"><div class="num mono" id="cd-d">––</div><div class="lbl">days</div></div>
-        <div class="seg"><div class="num mono" id="cd-h">––</div><div class="lbl">hrs</div></div>
-        <div class="seg"><div class="num mono" id="cd-m">––</div><div class="lbl">min</div></div>
-        <div class="seg"><div class="num mono" id="cd-s">––</div><div class="lbl">sec</div></div>
+      <div class="panel upgrade" id="upgrade">
+        <div>
+          <div class="label">CALIBRATION UPGRADE INCOMING</div>
+          <div class="name">Network version <span id="up-nv">29</span> <span class="codename" id="up-codename">Solstice</span></div>
+          <div class="meta">
+            <span class="k">activates</span> <span class="mono" id="up-when">2026-09-28T12:59:30Z</span><br>
+            <span class="k">at epoch</span> <span class="mono" id="up-epoch">4,109,133</span> <span class="k">·</span> <span class="k">in</span> <span class="mono" id="up-eta">––</span><br>
+            <span id="up-window-row"><span class="k">window</span> <span class="mono" id="up-window">2026-09-28 12:59-13:59 UTC</span><br></span>
+            <a id="up-link" href="https://github.com/filecoin-project/community/discussions/74#discussioncomment-18565956" target="_blank" rel="noopener">community announcement →</a>
+          </div>
+        </div>
+        <div class="timer">
+          <div class="seg"><div class="num mono" id="cd-d">––</div><div class="lbl">days</div></div>
+          <div class="seg"><div class="num mono" id="cd-h">––</div><div class="lbl">hrs</div></div>
+          <div class="seg"><div class="num mono" id="cd-m">––</div><div class="lbl">min</div></div>
+          <div class="seg"><div class="num mono" id="cd-s">––</div><div class="lbl">sec</div></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1107,37 +1126,73 @@ async function fetchJSON(p) {
 }
 
 // ---------- countdown ----------
-const NV28_UNIX  = 1778162400;
 const GENESIS    = 1667326380;
 const EPOCH_SECS = 30;
 
+// Calibration upgrade schedule, ordered by epoch. Mirrors calibUpgrades in
+// api/main.go. Epochs follow the Lotus calibnet build params. nv29: the
+// announcement text says 4097613 (= 2026-09-24), but its stated date,
+// Lotus v1.37.0-rc1 and Forest v0.37.0 all use 4109133 (= 2026-09-28).
+const UPGRADES = [
+  { nv: 28, name: 'Fire Horse', epoch: 3694534,
+    link: 'https://github.com/filecoin-project/community/discussions/74#discussioncomment-16540452' },
+  { nv: 29, name: 'Solstice', epoch: 4109133, window: '2026-09-28 12:59-13:59 UTC',
+    link: 'https://github.com/filecoin-project/community/discussions/74#discussioncomment-18565956' },
+];
+const upUnix = u => GENESIS + u.epoch * EPOCH_SECS;
+const upISO  = u => new Date(upUnix(u) * 1000).toISOString().replace('.000Z', 'Z');
+
+let _upgradeKey = '';
+function renderUpgradePanels(now) {
+  const done = UPGRADES.filter(u => upUnix(u) <= now);
+  const cur  = done[done.length - 1] || null;
+  const next = UPGRADES.find(u => upUnix(u) > now) || null;
+  const key  = `${cur ? cur.nv : '-'}/${next ? next.nv : '-'}`;
+  if (key === _upgradeKey) return next;
+  _upgradeKey = key;
+
+  const curPanel = document.getElementById('upgrade-current');
+  if (cur) {
+    curPanel.classList.remove('is-hidden');
+    setText('cur-nv', cur.nv);
+    setText('cur-codename', cur.name);
+    setHTML('cur-meta',
+      `<span class="k">status</span> <span class="mono">nv${cur.nv} stable</span><br>` +
+      `<span class="k">activated</span> <span class="mono">${upISO(cur)}</span> ` +
+      `<span class="k">·</span> <span class="k">at epoch</span> <span class="mono">${cur.epoch.toLocaleString('en-US')}</span><br>` +
+      `<a href="${cur.link}" target="_blank" rel="noopener">community announcement →</a>`);
+  } else {
+    curPanel.classList.add('is-hidden');
+  }
+
+  const upPanel = document.getElementById('upgrade');
+  if (next) {
+    upPanel.classList.remove('is-hidden');
+    setText('up-nv', next.nv);
+    setText('up-codename', next.name);
+    setText('up-when', upISO(next));
+    setText('up-epoch', next.epoch.toLocaleString('en-US'));
+    const wr = document.getElementById('up-window-row');
+    if (next.window) { wr.style.display = ''; setText('up-window', next.window); }
+    else wr.style.display = 'none';
+    document.getElementById('up-link').href = next.link;
+  } else {
+    upPanel.classList.add('is-hidden');
+  }
+  return next;
+}
+
 function tickCountdown() {
   const now = Math.floor(Date.now() / 1000);
-  const left = NV28_UNIX - now;
-  const panel = document.getElementById('upgrade');
-  if (left <= 0) {
-    // Upgrade has activated. Flip panel into stable/complete state.
-    if (panel && !panel.classList.contains('is-complete')) {
-      panel.classList.add('is-complete');
-      const labelEl = panel.querySelector('.label');
-      if (labelEl) labelEl.textContent = 'CALIBRATION UPGRADE COMPLETE';
-      const metaEl = panel.querySelector('.meta');
-      if (metaEl) {
-        metaEl.innerHTML =
-          '<span class="k">status</span> <span class="mono">nv28 stable</span><br>' +
-          '<span class="k">activated</span> <span class="mono">2026-05-07T14:00:00Z</span> ' +
-          '<span class="k">·</span> <span class="k">at epoch</span> <span class="mono">3,694,534</span><br>' +
-          '<a href="https://github.com/filecoin-project/community/discussions/74#discussioncomment-16540452" target="_blank" rel="noopener">community announcement →</a>';
-      }
-    }
-    return;
-  }
+  const next = renderUpgradePanels(now);
+  if (!next) return;
+  const left = upUnix(next) - now;
   const d = Math.floor(left / 86400);
   const h = Math.floor((left % 86400) / 3600);
   const m = Math.floor((left % 3600) / 60);
-  const s = left % 60;
+  const sec = left % 60;
   setText('cd-d', pad2(d)); setText('cd-h', pad2(h));
-  setText('cd-m', pad2(m)); setText('cd-s', pad2(s));
+  setText('cd-m', pad2(m)); setText('cd-s', pad2(sec));
   setText('up-eta', `${d}d ${pad2(h)}h ${pad2(m)}m`);
 }
 
