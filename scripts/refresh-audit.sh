@@ -1,173 +1,201 @@
 #!/usr/bin/env bash
 # Refresh calix's static post-upgrade audit JSON.
 #
-# Calix runs against a public Lotus RPC (Glif) that gates the admin methods
-# we need for actor manifest / migration audit / state integrity. Rather
-# than deploying a permanent SSH tunnel from Hetzner to the calibration
-# datacenter, we refresh the audit data off-band: open a temporary tunnel
-# from this laptop, pull the data, write web/data/audit.json, push to
-# Hetzner via the deploy script, close the tunnel.
+# Runs a single remote fetch against a Filecoin lotus node (calibration
+# network) as a user allowed to invoke admin RPCs, stitches the returned
+# JSON into web/data/audit.json, and prints a summary. Push to production
+# via ./deploy/deploy.sh.
+#
+# Access to the remote node is not baked in. Set:
+#
+#   export CALIX_REMOTE_SSH="ssh <your-lotus-host>"
+#
+# CALIX_REMOTE_SSH is any shell command prefix that opens an SSH session
+# into the lotus node (a bare `ssh alias`, `ssh -J jump user@node`, an
+# `ssh -F file host`, etc). It must accept a script on stdin and run it
+# as a user that can execute `lotus auth api-info --perm admin`. Password
+# handling, jump chains, IPv6 vs IPv4, and known-hosts policy all live in
+# the caller's private SSH configuration.
 #
 # Usage:  ./scripts/refresh-audit.sh [<network-version>]
 #
-# Defaults to nv28 (Fire Horse). nv29 (Solstice) activates at 4109133. When a new upgrade ships, update both the
-# canonical manifest CID inside this script and the table in
-# .vault/calix-canonical-manifests.md.
+# When a new upgrade ships, update the activation epoch and the canonical
+# manifest CID entries in this script.
 
 set -euo pipefail
 
 NV="${1:-28}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA="$ROOT/web/data"
-WORK="/tmp/calix-audit"
 
-# nv → activation epoch.
+# nv -> activation epoch.
 case "$NV" in
   28) ACTIVATION_EPOCH=3694534 ;;
   29) ACTIVATION_EPOCH=4109133 ;;  # Lotus v1.37.0-rc1 / Forest v0.37.0 (announcement text typo: 4097613)
   *)  echo "ERR: unknown nv$NV activation epoch (update this script)" >&2; exit 1 ;;
 esac
 
-# nv → canonical manifest CID. Calibration values pulled from a known-good
-# lotus node on the day of activation. Mainnet would differ.
+# nv -> canonical manifest CID (calibration net).
 case "$NV" in
   25|26) CANONICAL=bafy2bzacecqtwq6hjhj2zy5gwjp76a4tpcg2lt7dps5ycenvynk2ijqqyo65e ;;
   27)    CANONICAL=bafy2bzacecn64rlb52rjsvgopnidz6w42z3zobmjxqek5s4xqjh3ly47rcurg ;;
   28)    CANONICAL=bafy2bzacebkfatnbe6w4rj7lf6gkjh7mywlrpdh2dj6hu2dl4rmtwksszm2hs ;;
-  29)    CANONICAL=bafy2bzaceastk5qjmpnaqeeq6whogrlcymyurzyq6jawkntdzwedaznw7amvy ;;  # actors v19.0.1, re-confirm post-activation
+  29)    CANONICAL=bafy2bzaceastk5qjmpnaqeeq6whogrlcymyurzyq6jawkntdzwedaznw7amvy ;;  # actors v19.0.1
   *)     echo "ERR: unknown nv$NV canonical manifest (update this script)" >&2; exit 1 ;;
 esac
 
-# 1. Open the temporary tunnel ([REDACTED-HOST] jump → calib node).
-JUMP_PW_FILE=$(mktemp); chmod 600 "$JUMP_PW_FILE"
-trap 'rm -f "$JUMP_PW_FILE"; lsof -iTCP:1235 -sTCP:LISTEN -t 2>/dev/null | xargs -r kill 2>/dev/null || true' EXIT INT TERM
+if [ -z "${CALIX_REMOTE_SSH:-}" ]; then
+  echo "ERR: set CALIX_REMOTE_SSH to a shell command prefix that opens an SSH session into your lotus calibration node." >&2
+  echo "     Example:  export CALIX_REMOTE_SSH='ssh calib'" >&2
+  exit 1
+fi
 
-JUMP_PW=$(grep -E '^- Jump host' "$HOME/.openclaw/workspace/.vault/[REDACTED]" | grep -oE 'password=\S+' | sed 's/password=//')
-DEST_PW=$(grep -E '^- Calibration node' "$HOME/.openclaw/workspace/.vault/[REDACTED]" | grep -oE 'password=\S+' | sed 's/password=//')
-[ -z "$JUMP_PW" ] && { echo "ERR: jump password not found in vault" >&2; exit 1; }
-[ -z "$DEST_PW" ] && { echo "ERR: dest password not found in vault" >&2; exit 1; }
-printf '%s' "$JUMP_PW" > "$JUMP_PW_FILE"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT INT TERM
 
-PROXY="sshpass -f $JUMP_PW_FILE ssh -W %h:%p -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/[REDACTED] -o PubkeyAuthentication=no -o PreferredAuthentications=password [REDACTED-HOST]"
+# The remote fetch script: gets an admin token from lotus, discovers the
+# RPC endpoint from api-info, and runs the four calls we need.
+cat > "$WORK/remote.sh" <<'REMOTE'
+#!/usr/bin/env bash
+set -uo pipefail
+NV="${1:?}"
+ACT="${2:?}"
 
-echo "==> opening tunnel"
-SSHPASS="$DEST_PW" nohup sshpass -e ssh \
-  -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$HOME/.ssh/[REDACTED]" \
-  -o PubkeyAuthentication=no -o PreferredAuthentications=password \
-  -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes \
-  -N -L 1235:[REDACTED-HOST]:1234 \
-  -o "ProxyCommand=$PROXY" \
-  [REDACTED-HOST] \
-  >/tmp/calix-tunnel.log 2>&1 &
-disown
-sleep 4
+INFO=$(lotus auth api-info --perm admin 2>/dev/null | sed -E 's/^FULLNODE_API_INFO=//')
+TOKEN=***
+MADDR="${INFO#*:}"
+HOST=$(echo "$MADDR" | awk -F/ '{print $3}')
+PORT=$(echo "$MADDR" | awk -F/ '{print $5}')
+[ -z "$TOKEN" ] || [ -z "$HOST" ] || [ -z "$PORT" ] && { echo "ERR: could not parse api-info" >&2; exit 1; }
+RPC="http://$HOST:$PORT/rpc/v1"
+HDR="Authorization: Bearer ***"
+CT="content-type: application/json"
 
-# 2. Pull the admin token via SSH (don't store it).
-TOKEN=$(SSHPASS="$DEST_PW" sshpass -e ssh \
-  -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$HOME/.ssh/[REDACTED]" \
-  -o PubkeyAuthentication=no -o PreferredAuthentications=password \
-  -o "ProxyCommand=$PROXY" \
-  [REDACTED-HOST] \
-  'lotus auth api-info --perm admin 2>/dev/null | sed -E "s/^FULLNODE_API_INFO=//; s/:.*//"')
+call() {
+  curl -sS "$RPC" -H "$HDR" -H "$CT" \
+    --data "{\"jsonrpc\":\"2.0\",\"method\":\"$1\",\"params\":$2,\"id\":1}"
+}
 
-[ -z "$TOKEN" ] && { echo "ERR: could not pull admin token" >&2; exit 1; }
-RPC="http://127.0.0.1:1235/rpc/v1"
-H="Authorization: Bearer $TOKEN"
+echo "=== MANIFEST ==="
+call Filecoin.StateActorManifestCID "[$NV]"
+echo
+echo "=== ACTORS ==="
+call Filecoin.StateActorCodeCIDs "[$NV]"
+echo
+echo "=== HEAD ==="
+HEAD_JSON=$(call Filecoin.ChainHead "[]")
+echo "$HEAD_JSON"
+echo
+TSK_ACT=$(call Filecoin.ChainGetTipSetByHeight "[$ACT,null]" | python3 -c "import sys,json;print(json.dumps(json.load(sys.stdin)['result']['Cids']))")
+echo "=== MIGRATION ==="
+call Filecoin.StateCompute "[$ACT, [], $TSK_ACT]"
+echo
+HEAD_HEIGHT=$(echo "$HEAD_JSON" | python3 -c "import sys,json;print(json.load(sys.stdin)['result']['Height'])")
+TARGET=$((HEAD_HEIGHT-1))
+TSK_INT=$(call Filecoin.ChainGetTipSetByHeight "[$TARGET,null]" | python3 -c "import sys,json;print(json.dumps(json.load(sys.stdin)['result']['Cids']))")
+echo "=== INTEGRITY_EPOCH ==="
+echo "$TARGET"
+echo
+echo "=== INTEGRITY ==="
+call Filecoin.StateCompute "[$TARGET, [], $TSK_INT]"
+echo
+REMOTE
 
-# 3. Pull live data into temp dir.
-mkdir -p "$WORK"
-echo "==> fetching manifest, migration, integrity"
-curl -sS "$RPC" -H "$H" -H 'content-type: application/json' \
-  --data "{\"jsonrpc\":\"2.0\",\"method\":\"Filecoin.StateActorManifestCID\",\"params\":[$NV],\"id\":1}" > "$WORK/manifest.json"
-curl -sS "$RPC" -H "$H" -H 'content-type: application/json' \
-  --data "{\"jsonrpc\":\"2.0\",\"method\":\"Filecoin.StateActorCodeCIDs\",\"params\":[$NV],\"id\":1}" > "$WORK/actors.json"
-curl -sS "$RPC" -H "$H" -H 'content-type: application/json' \
-  --data "{\"jsonrpc\":\"2.0\",\"method\":\"Filecoin.ChainGetTipSetByHeight\",\"params\":[$ACTIVATION_EPOCH,null],\"id\":1}" > "$WORK/ts-activation.json"
-TSK=$(python3 -c "import json; print(json.dumps(json.load(open('$WORK/ts-activation.json'))['result']['Cids']))")
-curl -sS "$RPC" -H "$H" -H 'content-type: application/json' \
-  --data "{\"jsonrpc\":\"2.0\",\"method\":\"Filecoin.StateCompute\",\"params\":[$ACTIVATION_EPOCH, [], $TSK],\"id\":1}" > "$WORK/migration.json"
+echo "==> fetching via CALIX_REMOTE_SSH"
+$CALIX_REMOTE_SSH \
+  "cat > /tmp/calix-fetch.sh && chmod +x /tmp/calix-fetch.sh && bash /tmp/calix-fetch.sh $NV $ACTIVATION_EPOCH" \
+  < "$WORK/remote.sh" > "$WORK/out.txt"
 
-curl -sS "$RPC" -H "$H" -H 'content-type: application/json' \
-  --data '{"jsonrpc":"2.0","method":"Filecoin.ChainHead","params":[],"id":1}' > "$WORK/head.json"
-TARGET=$(python3 -c "import json; print(json.load(open('$WORK/head.json'))['result']['Height']-1)")
-curl -sS "$RPC" -H "$H" -H 'content-type: application/json' \
-  --data "{\"jsonrpc\":\"2.0\",\"method\":\"Filecoin.ChainGetTipSetByHeight\",\"params\":[$TARGET,null],\"id\":1}" > "$WORK/ts-integrity.json"
-TSK2=$(python3 -c "import json; print(json.dumps(json.load(open('$WORK/ts-integrity.json'))['result']['Cids']))")
-curl -sS "$RPC" -H "$H" -H 'content-type: application/json' \
-  --data "{\"jsonrpc\":\"2.0\",\"method\":\"Filecoin.StateCompute\",\"params\":[$TARGET, [], $TSK2],\"id\":1}" > "$WORK/integrity.json"
-
-# 4. Stitch into the static audit JSON.
-mkdir -p "$DATA"
-NV=$NV TARGET=$TARGET CANONICAL=$CANONICAL ACTIVATION_EPOCH=$ACTIVATION_EPOCH WORK=$WORK DATA=$DATA python3 <<'PY'
-import json, time, os
+# Stitch locally.
+NV=$NV ACT=$ACTIVATION_EPOCH CANONICAL=$CANONICAL SRC=$WORK/out.txt DATA=$DATA python3 <<'PY'
+import json, os, re, sys, time
 
 NV = int(os.environ['NV'])
-TARGET = int(os.environ['TARGET'])
+ACT = int(os.environ['ACT'])
 CANONICAL = os.environ['CANONICAL']
-ACTIVATION = int(os.environ['ACTIVATION_EPOCH'])
-WORK = os.environ['WORK']
+SRC = os.environ['SRC']
 DATA = os.environ['DATA']
 
-manifest = json.load(open(f"{WORK}/manifest.json"))['result']['/']
-actors_raw = json.load(open(f"{WORK}/actors.json"))['result']
-migration = json.load(open(f"{WORK}/migration.json"))['result']
-integrity = json.load(open(f"{WORK}/integrity.json"))['result']
+def split_sections(text):
+    out, current, buf = {}, None, []
+    for line in text.splitlines():
+        m = re.match(r'^=== (\w+) ===$', line)
+        if m:
+            if current is not None:
+                out[current] = '\n'.join(buf).strip()
+            current, buf = m.group(1), []
+        else:
+            buf.append(line)
+    if current is not None:
+        out[current] = '\n'.join(buf).strip()
+    return out
 
 def count_failures(trace):
-    return sum(1 for t in trace if t.get('MsgRct',{}).get('ExitCode',0) != 0 or t.get('Error',''))
+    return sum(1 for t in trace if t.get('MsgRct', {}).get('ExitCode', 0) != 0 or t.get('Error'))
+
+s = split_sections(open(SRC).read())
+manifest = json.loads(s['MANIFEST'])['result']['/']
+actors_raw = json.loads(s['ACTORS'])['result']
+migration = json.loads(s['MIGRATION'])['result']
+integrity = json.loads(s['INTEGRITY'])['result']
+integrity_epoch = int(s['INTEGRITY_EPOCH'])
 
 now = int(time.time())
 mig_failures = count_failures(migration['Trace'])
 int_failures = count_failures(integrity['Trace'])
 
 audit = {
-    "schemaVersion": 1,
-    "generatedAt": now,
-    "actors": {
-        "networkVersion": NV,
-        "manifestCID": manifest,
-        "canonicalCID": CANONICAL,
-        "match": manifest == CANONICAL,
-        "haveCanonical": True,
-        "actors": sorted(
-            [{"name": k, "cid": v["/"]} for k,v in actors_raw.items()],
-            key=lambda x: x["name"]
+    'schemaVersion': 1,
+    'generatedAt': now,
+    'actors': {
+        'networkVersion': NV,
+        'manifestCID': manifest,
+        'canonicalCID': CANONICAL,
+        'match': manifest == CANONICAL,
+        'haveCanonical': True,
+        'actors': sorted(
+            [{'name': k, 'cid': v['/']} for k, v in actors_raw.items()],
+            key=lambda x: x['name'],
         ),
-        "generatedAt": now,
+        'generatedAt': now,
     },
-    "migration": {
-        "networkVersion": NV,
-        "epoch": ACTIVATION,
-        "confirmEpoch": ACTIVATION + 11,
-        "postStateRoot": migration["Root"]["/"],
-        "messages": len(migration["Trace"]),
-        "failures": mig_failures,
-        "status": "ok" if mig_failures == 0 else "failed",
-        "detail": (
+    'migration': {
+        'networkVersion': NV,
+        'epoch': ACT,
+        'confirmEpoch': ACT + 11,
+        'postStateRoot': migration['Root']['/'],
+        'messages': len(migration['Trace']),
+        'failures': mig_failures,
+        'status': 'ok' if mig_failures == 0 else 'failed',
+        'detail': (
             f"{len(migration['Trace'])} messages applied, all exit code 0"
             if mig_failures == 0
             else f"{mig_failures} of {len(migration['Trace'])} messages failed at activation"
         ),
-        "generatedAt": now,
+        'generatedAt': now,
     },
-    "integrity": {
-        "epoch": TARGET,
-        "messages": len(integrity["Trace"]),
-        "failures": int_failures,
-        "postStateRoot": integrity["Root"]["/"],
-        "status": "ok" if int_failures == 0 else ("degraded" if int_failures < len(integrity["Trace"]) else "failed"),
-        "detail": f"{len(integrity['Trace'])} messages, {int_failures} errors",
-        "generatedAt": now,
+    'integrity': {
+        'epoch': integrity_epoch,
+        'messages': len(integrity['Trace']),
+        'failures': int_failures,
+        'postStateRoot': integrity['Root']['/'],
+        'status': (
+            'ok' if int_failures == 0
+            else ('degraded' if int_failures < len(integrity['Trace']) else 'failed')
+        ),
+        'detail': f"{len(integrity['Trace'])} messages, {int_failures} errors",
+        'generatedAt': now,
     },
 }
 
-out = f"{DATA}/audit.json"
-with open(out, "w") as f:
+os.makedirs(DATA, exist_ok=True)
+out = f'{DATA}/audit.json'
+with open(out, 'w') as f:
     json.dump(audit, f, indent=2)
-print(f"wrote {out} ({os.path.getsize(out)} bytes)")
+print(f'wrote {out} ({os.path.getsize(out)} bytes)')
 print(f"  manifest match: {audit['actors']['match']}")
-print(f"  migration:      {audit['migration']['messages']} msgs, {audit['migration']['failures']} failures")
-print(f"  integrity:      epoch {audit['integrity']['epoch']}, {audit['integrity']['messages']} msgs, {audit['integrity']['failures']} failures")
+print(f"  migration:      epoch {audit['migration']['epoch']}  {audit['migration']['messages']} msgs  {audit['migration']['failures']} failures")
+print(f"  integrity:      epoch {audit['integrity']['epoch']}  {audit['integrity']['messages']} msgs  {audit['integrity']['failures']} failures")
 PY
 
 echo "==> done. Run ./deploy/deploy.sh to ship."

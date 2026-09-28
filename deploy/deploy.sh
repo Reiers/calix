@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Calix deploy script.
 #
-# Builds a Linux/amd64 binary, ships everything to the Hetzner host
-# ([REDACTED-HOST]), wires up the systemd unit, and reloads nginx.
-# Idempotent.
+# Builds a Linux/amd64 binary, ships to a remote host, wires up the systemd
+# unit, and reloads nginx. Idempotent.
+#
+# Set the target host explicitly:
+#   export CALIX_HOST="user@host"
+#
 set -euo pipefail
 
-HOST="${CALIX_HOST:-[REDACTED-HOST]}"
+HOST="${CALIX_HOST:?set CALIX_HOST=user@host to deploy}"
 REMOTE="/opt/calix"
 
 cd "$(dirname "$0")/.."
