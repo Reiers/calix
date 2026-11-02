@@ -7,9 +7,14 @@
 # Set the target host explicitly:
 #   export CALIX_HOST="user@host"
 #
+# The final verify step curls CALIX_VERIFY_URL (default: the public
+# https://calix.reiers.io). When deploying to a new or staging host that
+# is not yet behind the public name, point it at that host.
+#
 set -euo pipefail
 
 HOST="${CALIX_HOST:?set CALIX_HOST=user@host to deploy}"
+VERIFY_URL="${CALIX_VERIFY_URL:-https://calix.reiers.io}"
 REMOTE="/opt/calix"
 
 cd "$(dirname "$0")/.."
@@ -53,10 +58,10 @@ REMOTE_SCRIPT
 echo "==> verify"
 sleep 2
 echo "--- /api/v1/health ---"
-curl -fsS https://calix.reiers.io/api/v1/health || echo "warn: health probe failed"
+curl -fsS "$VERIFY_URL/api/v1/health" || echo "warn: health probe failed"
 echo
 echo "--- /api/v1/status ---"
-curl -fsS https://calix.reiers.io/api/v1/status | python3 -c "
+curl -fsS "$VERIFY_URL/api/v1/status" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 print(f\"  level     : {d['level']}\")
@@ -66,4 +71,4 @@ print(f\"  head age  : {d['headAgeSeconds']}s\")
 print(f\"  next up   : {d['upgradeName']} in {d['upgradeSecsLeft']}s ({d['upgradeEpochsLeft']} epochs)\")
 " 2>/dev/null || true
 echo
-echo "live: https://calix.reiers.io"
+echo "live: $VERIFY_URL"
