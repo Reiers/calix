@@ -18,14 +18,14 @@ the next upgrade?".
 
 Calix is part of the wider calibration stability project at
 [reiers.io](https://reiers.io). Sister projects:
-- [Plumbline](https://faucet.reiers.io) — calibration faucet for tFIL + USDFC
+- [Plumbline](https://faucet.reiers.io): calibration faucet for tFIL + USDFC
 - The Doctor calibration cluster
 
 ## What's on the dashboard
 
 ### Status header
 A sticky bar across the top.
-- Operational pill — `OPERATIONAL` / `WATCH` / `DEGRADED` / `UPGRADE PENDING`, computed live from chain head age and proximity to the next network upgrade.
+- Operational pill: `OPERATIONAL` / `WATCH` / `DEGRADED` / `UPGRADE PENDING`, computed live from chain head age and proximity to the next network upgrade.
 - Live epoch, head age, network version, and current blocks-per-epoch cadence.
 
 ### Status banner
@@ -33,14 +33,14 @@ First panel on the page. Spells out the current operational level in plain Engli
 
 ### Vital signs (8 KPIs)
 Eight cards in a grid, each with an inline 60-epoch sparkline. Each card flips colour (green / amber / red) as the underlying value moves through its thresholds.
-- **Blocks per epoch** — calibration steady state is around 2.0
-- **Null round %** — count of empty tipsets in the window
-- **Average win count** — drand winning tickets per epoch
-- **Base fee** — in atto, with K/M scaling for spikes
-- **Network QAP** — quality-adjusted power
-- **Active miners** — those above min-power
-- **Total pledge** — locked FIL across the network
-- **Initial pledge per 32 GiB CC** — computed locally via the actor v17 formula
+- **Blocks per epoch**: calibration steady state is around 2.0
+- **Null round %**: count of empty tipsets in the window
+- **Average win count**: drand winning tickets per epoch
+- **Base fee**: in atto, with K/M scaling for spikes
+- **Network QAP**: quality-adjusted power
+- **Active miners**: those above min-power
+- **Total pledge**: locked FIL across the network
+- **Initial pledge per 32 GiB CC**: computed locally via the actor v17 formula
 
 ### Tipset stream
 Sixty vertical bars covering the last 30 minutes of chain history.
@@ -56,13 +56,13 @@ Two cards: the current network version (nv28 Fire Horse, activated epoch 3,694,5
 Twenty-four-hour QAP trend, drawn as a native SVG line + area. Redraws on window resize so the geometry stays in real pixels.
 
 ### Leaderboards
-- **Top miners by power** — raw, QAP, 24-hour delta, blocks mined, and on-chain tags (Curio Storage Inc., etc.)
-- **Rich list** — top accounts by balance, with actor type and percent of supply
+- **Top miners by power**: raw, QAP, 24-hour delta, blocks mined, and on-chain tags (Curio Storage Inc., etc.)
+- **Rich list**: top accounts by balance, with actor type and percent of supply
 
 ### Ecosystem
-- **FEVM** — daily contract creates, invocations, gas
-- **Plumbline** — calibration faucet card
-- **Open source** — link to this repository
+- **FEVM**: daily contract creates, invocations, gas
+- **Plumbline**: calibration faucet card
+- **Open source**: link to this repository
 
 ### Tools
 Bidirectional epoch ↔ time converter. Calibration genesis 1667326380, 30-second epochs.
@@ -99,7 +99,13 @@ GET /api/v1/rich-list        Rich list
 GET /api/v1/power-history    Power history (?duration=24h | 7d | 30d)
 GET /api/v1/fevm-stats       FEVM daily statistics
 GET /api/v1/faucet           Plumbline faucet metadata
+GET /api/v1/finality         Chain finality (EC + F3), see below
+GET /api/v1/miners/status    Liveness per miner (?addrs=t0143103,...)
+GET /metrics                 Prometheus text format
 ```
+
+`/api/v1/health` only says the process is up. For chain freshness use
+`headAgeSeconds` from `/api/v1/status` (healthy below 300).
 
 ## Run locally
 
@@ -114,23 +120,71 @@ cd web && python3 -m http.server 8766
 
 ## Deploy
 
+Run from a workstation, not on the host (the host needs no Go).
+
+Workstation: Go 1.22 or newer, `git`, `rsync`, `ssh` with root (or
+sudo-less admin) access to the host.
+Host: Ubuntu 24.04 with `rsync` and `nginx` installed and running, and
+the Cloudflare Origin CA cert at `/etc/ssl/cloudflare/reiers.io.{crt,key}`
+(the paths `deploy/calix.nginx` expects; edit it for other hostnames).
+
 ```sh
+export CALIX_HOST=root@<plumbline-host>
+# optional, for a host not yet behind the public name:
+# export CALIX_VERIFY_URL=https://<staging-name>
 ./deploy/deploy.sh
 ```
 
-Builds linux/amd64, rsyncs to the host, sets up the systemd unit,
-symlinks the nginx server block, fixes file modes for `www-data`, and
-reloads.
+Builds linux/amd64, rsyncs `calix-api` and `web/` to `/opt/calix`,
+installs `deploy/calix.service` and the nginx server block, fixes file
+modes for `www-data`, restarts, and reloads nginx. Idempotent. Verified
+on a fresh Ubuntu 24.04 host on 2026-11-02: under 10 seconds once nginx
+and the cert are in place.
 
-Configurable via env: `CALIX_ADDR`, `CALIX_LOTUS_RPC`, `CALIX_FILFOX_API`,
-`CALIX_CORS`, `CALIX_FAUCET_URL`.
+After a restart Calix needs about 10 seconds to fill its tipset ring;
+until then `/api/v1/miners/status` reports every miner as `down` with
+`epoch: 0`.
+
+### Configuration
+
+Environment variables (set in `deploy/calix.service`, or override on the
+host with `systemctl edit calix` so a redeploy does not undo it):
+
+| Variable | Default in code | Notes |
+| --- | --- | --- |
+| `CALIX_ADDR` | `:8080` | The unit sets `127.0.0.1:8765`, which nginx proxies to. |
+| `CALIX_LOTUS_RPC` | Glif Calibration `/rpc/v1` | Any Calibration Lotus JSON-RPC. |
+| `CALIX_LOTUS_RPC_V2` | `CALIX_LOTUS_RPC` with `/rpc/v2` | For the finality panel. |
+| `CALIX_LOTUS_TOKEN` | empty | Bearer token if the RPC needs one. |
+| `CALIX_FILFOX_API` | Filfox Calibration API | Leaderboards, rich list, FEVM. |
+| `CALIX_CORS` | `*` | `Access-Control-Allow-Origin`. |
+| `CALIX_FAUCET_URL` | `https://faucet.reiers.io` | Faucet card. |
+
+Switch RPC without editing the repo:
+
+```sh
+systemctl edit calix
+# [Service]
+# Environment=CALIX_LOTUS_RPC=https://rpc.ankr.com/filecoin_testnet
+systemctl restart calix
+```
+
+### nv-upgrade audit refresh
+
+`scripts/refresh-audit.sh <nv>` writes `web/data/audit.json`. It needs
+SSH access (`CALIX_REMOTE_SSH`) to a Calibration Lotus node where
+`lotus auth api-info --perm admin` works; public RPCs do not expose the
+calls it uses. For each new network version, update in one commit:
+`calibUpgrades` and `canonicalManifestCIDs` in `api/main.go`,
+`UPGRADES` in `web/index.html`, and the two `case` tables in
+`scripts/refresh-audit.sh`. Then deploy.
 
 ## What's coming
 
-- **Per-miner upgrade readiness** — the chain doesn't expose Lotus version directly, but for Storage Providers running Curio we can correlate via the cluster webrpc. A "X of N miners are on Curio v1.28" tile is the single most useful Fire Horse readiness signal.
-- **Chain-weight / fork visualisation** — calibration occasionally forks; weight divergence over time is a high-signal stability metric.
-- **Cluster lens** behind auth — sealing tasks, recent failures, machines online. Sourced from a Curio cluster's webrpc through a tunnel.
-- **Alerts** — a `/api/v1/alerts` surface so other tooling can poll Calix; later, push to Telegram / matrix / webhook.
+- **Per-miner upgrade readiness**: the chain doesn't expose Lotus version directly, but for Storage Providers running Curio we can correlate via the cluster webrpc. A "X of N miners are on Curio v1.28" tile is the single most useful Fire Horse readiness signal.
+- **Chain-weight / fork visualisation**: calibration occasionally forks; weight divergence over time is a high-signal stability metric.
+- **Cluster lens** behind auth: sealing tasks, recent failures, machines online. Sourced from a Curio cluster's webrpc through a tunnel.
+- **Alerts**: a `/api/v1/alerts` surface so other tooling can poll Calix; later, push to Telegram / matrix / webhook.
 
 ## License
 
